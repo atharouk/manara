@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>منارة — نسخة سحابية</title>
+<link href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Noto+Naskh+Arabic:wght@400;600&family=Readex+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eaf1f0;--card:#fff;--ink:#12292e;--mute:#5b7378;--line:#d3e0de;--deep:#0e3b43;--lag:#1c8a86;--lamp:#f2b134;--bad:#b4442f;--good:#17745a;--on:#eaf6f4;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1a1d;--card:#13282c;--ink:#e6f1ef;--mute:#8fabad;--line:#26434a;--deep:#07262c;--lag:#3bb5af;--bad:#ef8a75;--good:#5fd1ad}}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Readex Pro",Tahoma,sans-serif;line-height:1.7}
+button,select,input{font:inherit;color:inherit}button{cursor:pointer}
+:focus-visible{outline:3px solid var(--lamp);outline-offset:2px}
+.ar{font-family:"Amiri Quran","Noto Naskh Arabic",serif}
+header{background:var(--deep);color:var(--on);padding:12px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:1.3rem;display:flex;align-items:center;gap:10px;margin-inline-end:auto}
+.lamp{width:14px;height:14px;border-radius:50%;background:var(--lamp);box-shadow:0 0 14px 3px rgba(242,177,52,.55)}
+.chip{border:1px solid rgba(234,246,244,.35);background:transparent;color:inherit;border-radius:999px;padding:6px 14px;font-size:.9rem}
+.chip.on{background:var(--lamp);color:#2b1d00;border-color:var(--lamp);font-weight:600}
+header select{background:var(--deep);border:1px solid rgba(234,246,244,.35);border-radius:999px;padding:5px 12px}
+.demo{background:var(--lamp);color:#2b1d00;font-size:.8rem;padding:4px 20px;text-align:center}
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);max-width:1200px;margin:0 auto}
+aside{padding:20px 14px;border-inline-end:1px solid var(--line);align-self:start;position:sticky;top:0}
+.nv{display:flex;flex-direction:column;gap:4px}
+.nv button{text-align:start;background:transparent;border:0;border-radius:10px;padding:8px 12px}
+.nv button:hover{background:var(--line)}.nv button.on{background:var(--lag);color:#fff}
+main{padding:20px;min-width:0}
+@media (max-width:760px){.shell{grid-template-columns:1fr}aside{position:static;border:0;border-bottom:1px solid var(--line);padding:10px}.nv{flex-direction:row;overflow-x:auto}.nv button{white-space:nowrap}}
+h1{font-size:1.5rem;margin:.2rem 0 1rem}h2{font-size:1rem;color:var(--mute);font-weight:500;margin:20px 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.grow{flex:1}
+.btn{background:var(--lag);color:#fff;border:0;border-radius:10px;padding:8px 16px;font-weight:600}
+.btn.alt{background:transparent;color:var(--lag);border:1px solid var(--lag)}.btn:disabled{opacity:.55;cursor:default}
+.btn.lamp{background:var(--lamp);color:#2b1d00}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+.stat b{display:block;font-size:1.6rem}.stat span,.m{color:var(--mute);font-size:.85rem}
+.tag{font-size:.75rem;border-radius:999px;padding:1px 10px;background:var(--line)}.tag.w{background:var(--lamp);color:#2b1d00}
+.tbl{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:560px}
+th,td{padding:9px 8px;text-align:start;border-bottom:1px solid var(--line);font-size:.92rem}th{color:var(--mute);font-weight:500}
+.bar{height:8px;background:var(--line);border-radius:9px;min-width:80px;overflow:hidden}.bar i{display:block;height:100%;background:var(--lag)}
+.it{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.tabs{margin-bottom:12px}.tabs .chip{border-color:var(--line)}
+.hero{background:var(--deep);color:var(--on);border-radius:18px;padding:20px;margin-bottom:14px}.hero h1{margin:0 0 4px}
+.lanterns{display:flex;gap:8px;margin-top:10px}.ln{width:28px;height:36px;border-radius:10px 10px 14px 14px;background:rgba(234,246,244,.14)}
+.ln.lit{background:var(--lamp);box-shadow:0 0 14px 2px rgba(242,177,52,.5)}
+.task{display:flex;align-items:center;gap:10px;border:2px solid var(--lag)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.sub{text-align:start;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}.sub .em{font-size:1.7rem;display:block}
+.opts{display:grid;gap:8px;margin:10px 0}.opt{text-align:start;background:var(--card);border:2px solid var(--line);border-radius:12px;padding:10px 14px}
+.opt:hover:not(:disabled){border-color:var(--lag)}.opt.ok{border-color:var(--good)}.opt.no{border-color:var(--bad)}
+.fb{border-radius:10px;padding:10px 14px;margin:8px 0;background:var(--card);border-inline-start:6px solid var(--lamp)}
+.bigq{font-size:1.8rem;text-align:center;padding:10px;line-height:2}
+.ex{font-size:1.5rem;line-height:2.1}.big{font-size:5rem;text-align:center;line-height:1.3}
+.forms{display:flex;gap:8px;flex-wrap:wrap}.forms div{text-align:center;border:1px solid var(--line);border-radius:10px;padding:4px 10px}.forms b{display:block;font-size:2rem;font-weight:600}
+.wd{display:flex;gap:14px;align-items:center;justify-content:center;font-size:2.4rem}.wd .em{font-size:3rem}.wd mark{background:none;color:var(--bad)}
+.qtxt{font-size:1.9rem;line-height:2.6;text-align:justify}.ay.hid{filter:blur(9px);cursor:pointer}
+dialog{border:0;border-radius:16px;padding:20px;width:min(400px,92vw);background:var(--card);color:var(--ink)}dialog::backdrop{background:rgba(7,38,44,.6)}
+label{display:block;margin:10px 0 4px;color:var(--mute);font-size:.9rem}select,input[type=text],#due{width:100%;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--bg)}
+.note{font-size:.8rem;color:var(--mute);margin-top:16px}
+#toast{position:fixed;inset-inline:0;bottom:calc(20px + env(safe-area-inset-bottom,0px));margin:auto;width:max-content;max-width:90vw;background:var(--deep);color:var(--on);padding:10px 18px;border-radius:999px;opacity:0;transition:opacity .2s;pointer-events:none}#toast.show{opacity:1}
+
+.auth{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+.auth[hidden]{display:none}
+.authcard{width:min(380px,92vw);box-shadow:0 10px 40px rgba(0,0,0,.12)}
+.authcard h1{margin:0 0 6px}
+</style>
+</head>
+<body>
+<header><div class="brand"><span class="lamp"></span>منارة</div>
+<button class="chip" id="bT">عرض المعلم</button><button class="chip" id="bS">عرض الطالب</button><button class="chip" id="out">خروج</button><select id="st" aria-label="الطالب"></select></header>
+<div class="demo">نسخة تجريبية سحابية: التبديل بين العرضين للمعاينة فقط، والتقدّم يُحفظ في Supabase. كل المحتوى مسودات تحتاج مراجعة مختص.</div>
+<div class="shell"><aside id="side" aria-label="القائمة"></aside><main id="app"></main></div>
+<dialog id="dlg"></dialog><div id="toast" role="status"></div>
+<div id="auth" class="auth" hidden>
+  <div class="card authcard">
+    <h1>منارة</h1>
+    <p class="m">دخول المعلّم لإدارة الطلاب والمهام وحفظ التقدّم سحابياً.</p>
+    <label for="em">البريد الإلكتروني</label>
+    <input id="em" type="email" autocomplete="username" placeholder="teacher@example.com">
+    <label for="pw">كلمة المرور</label>
+    <input id="pw" type="password" autocomplete="current-password" placeholder="••••••••">
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="sin">دخول</button>
+      <button class="btn alt" id="sup">إنشاء حساب</button>
+    </div>
+    <p id="amsg" class="m" role="status" aria-live="polite"></p>
+  </div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
