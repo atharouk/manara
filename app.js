@@ -61,6 +61,27 @@ async function persistPromotion(s) {
   if (error) { console.error(error); toast('تعذّر حفظ الترقية: ' + error.message); }
 }
 
+async function persistStudent(s, isNew) {
+  const row = {id: s.id, name: s.n, level: s.lv};
+  const {error} = isNew
+    ? await sb.from('students').insert(row)
+    : await sb.from('students').update({name: s.n, level: s.lv}).eq('id', s.id);
+  if (error) { console.error(error); toast('تعذّر حفظ الطالب: ' + error.message); return false; }
+  return true;
+}
+
+async function removeStudent(id) {
+  const {error} = await sb.from('students').delete().eq('id', id);
+  if (error) { console.error(error); toast('تعذّر حذف الطالب: ' + error.message); return false; }
+  return true;
+}
+
+async function removeAssign(dbId) {
+  const {error} = await sb.from('assignments').delete().eq('id', dbId);
+  if (error) { console.error(error); toast('تعذّر حذف المهمة: ' + error.message); return false; }
+  return true;
+}
+
 async function seedDemo() {
   const demoStudents = [
     {id: 's1', name: 'أحمد', level: 'مبتدئ'},
@@ -153,11 +174,11 @@ function render() {
   $('#st').style.display = mode === 'S' ? '' : 'none';
   $('#st').innerHTML = students.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${E(s.n)}</option>`).join('');
   side();
-  ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, quran, sec: ssec, lesson})[view.p]();
+  ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, quran, sec: ssec, lesson})[view.p]();
 }
 function side() {
   const it = mode === 'T'
-    ? [['home', 'الرئيسية'], ['students', 'الطلاب'], ['cur', 'المنهج'], ['tasks', 'المهام'], ['quran', 'القرآن']]
+    ? [['home', 'الرئيسية'], ['students', 'الطلاب'], ['cur', 'المنهج'], ['tasks', 'المهام'], ['reports', 'التقارير'], ['quran', 'القرآن']]
     : [['home', 'الرئيسية'], ['quran', 'القرآن'], ...SECS.map(s => ['sec:' + s.id, s.icon + ' ' + s.t])];
   const cur = view.p === 'sec' ? 'sec:' + view.sec : view.p;
   $('#side').innerHTML = `<div class="nv">` + it.map(([k, t]) => `<button data-k="${k}" class="${cur === k ? 'on' : ''}">${t}</button>`).join('') + `</div>`;
@@ -190,11 +211,43 @@ function thome() {
   });
 }
 function tstud() {
-  app.innerHTML = `<h1>الطلاب</h1><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>التقدم في مستواه</th><th>أنجز</th><th></th></tr></thead><tbody>${students.map(s => {
+  app.innerHTML = `<h1>الطلاب</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(students.length)} طالب مسجّل</div><button class="btn" id="adds">+ إضافة طالب</button></div><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>التقدم في مستواه</th><th>أنجز</th><th>إجراءات</th></tr></thead><tbody>${students.map(s => {
     const p = prog(s);
-    return `<tr><td><b>${E(s.n)}</b></td><td><span class="tag">${s.lv}</span></td><td><div class="bar" title="${p.pct}%"><i style="width:${p.pct}%"></i></div></td><td>${N(done[s.id].size)} درساً</td><td><button class="btn alt" data-v="${s.id}">عرض كما يراه</button></td></tr>`;
+    return `<tr><td><b>${E(s.n)}</b></td><td><span class="tag">${s.lv}</span></td><td><div class="bar" title="${p.pct}%"><i style="width:${p.pct}%"></i></div></td><td>${N(done[s.id].size)} درساً</td><td class="row" style="gap:4px;flex-wrap:wrap"><button class="btn alt" data-v="${s.id}">عرض</button><button class="btn alt" data-e="${s.id}">تعديل</button><button class="btn alt" data-d="${s.id}">حذف</button></td></tr>`;
   }).join('')}</tbody></table></div>`;
   app.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { mode = 'S'; sid = b.dataset.v; go({p: 'home'}); });
+  app.querySelectorAll('[data-e]').forEach(b => b.onclick = () => studentDlg(b.dataset.e));
+  app.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => {
+    const s = students.find(x => x.id === b.dataset.d);
+    if (!confirm(`حذف الطالب «${s.n}» وكل إنجازاته؟`)) return;
+    if (await removeStudent(s.id)) {
+      students = students.filter(x => x.id !== s.id);
+      delete done[s.id];
+      if (sid === s.id) sid = students[0]?.id || null;
+      toast('تم حذف الطالب');
+      render();
+    }
+  });
+  $('#adds').onclick = () => studentDlg(null);
+}
+function studentDlg(id) {
+  const s = id ? students.find(x => x.id === id) : null;
+  const d = $('#dlg');
+  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">${s ? 'تعديل الطالب' : 'إضافة طالب'}</h2><label>الاسم</label><input id="sn" value="${E(s?.n || '')}" placeholder="اسم الطالب"><label>المستوى</label><select id="sl">${LV.map(l => `<option value="${l}" ${s?.lv === l ? 'selected' : ''}>${l}</option>`).join('')}</select><div class="row" style="margin-top:14px"><button class="btn" id="ok">حفظ</button><button class="btn alt" id="x">إلغاء</button></div>`;
+  d.showModal();
+  $('#x').onclick = () => d.close();
+  $('#ok').onclick = async () => {
+    const name = $('#sn').value.trim();
+    if (!name) { toast('اكتب اسم الطالب'); return; }
+    const rec = {id: s?.id || ('s' + Date.now()), n: name, lv: $('#sl').value};
+    const ok = await persistStudent(rec, !s);
+    if (!ok) return;
+    if (s) { s.n = rec.n; s.lv = rec.lv; }
+    else { students.push(rec); done[rec.id] = new Set(); }
+    d.close();
+    toast('تم حفظ الطالب');
+    render();
+  };
 }
 function tcur() {
   const sec = view.sec || SECS[0].id;
@@ -221,8 +274,36 @@ function assign(id) {
 function ttasks() {
   app.innerHTML = `<h1>المهام</h1>` + (assigns.length ? assigns.map(a => {
     const t = tgt(a), n = t.filter(s => done[s.id].has(a.id)).length;
-    return `<div class="card it"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">إلى: ${a.to === 'all' ? 'كل الطلاب' : E(t[0]?.n || '—')} · الموعد: ${E(a.due)}</div></div><span class="tag">${N(n)} / ${N(t.length)} سلّموا</span></div>`;
+    return `<div class="card it"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">إلى: ${a.to === 'all' ? 'كل الطلاب' : E(t[0]?.n || '—')} · الموعد: ${E(a.due)}</div></div><span class="tag">${N(n)} / ${N(t.length)} سلّموا</span><button class="btn alt" data-del="${a.dbId}">حذف</button></div>`;
   }).join('') : `<div class="card">لا توجد مهام بعد.</div>`);
+  app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('حذف هذه المهمة؟')) return;
+    if (await removeAssign(+b.dataset.del)) {
+      assigns = assigns.filter(x => x.dbId !== +b.dataset.del);
+      toast('تم حذف المهمة');
+      render();
+    }
+  });
+}
+
+function treports() {
+  const subs = SECS.map(x => {
+    const it = D.items.filter(i => i.sec === x.id);
+    const total = students.length * it.length;
+    const cnt = students.reduce((a, s) => a + it.filter(i => done[s.id].has(i.id)).length, 0);
+    return {id: x.id, t: x.t, icon: x.icon, total, cnt, pct: total ? Math.round(cnt / total * 100) : 0};
+  });
+  const allDone = students.reduce((a, s) => a + done[s.id].size, 0);
+  const allPct = students.length ? Math.round(students.reduce((a, s) => a + prog(s).pct, 0) / students.length) : 0;
+  const ready = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم').length;
+  app.innerHTML = `<h1>التقارير</h1>
+    <div class="stats"><div class="card stat"><b>${N(allPct)}%</b><span>إنجاز عام</span></div><div class="card stat"><b>${N(allDone)}</b><span>درس منجز</span></div><div class="card stat"><b>${N(ready)}</b><span>جاهز للترقية</span></div></div>
+    <h2>إنجاز المواد</h2><div class="card">${subs.map(s => `<div class="row" style="margin:8px 0"><div class="grow"><b>${s.icon} ${s.t}</b><div class="m">${N(s.cnt)} / ${N(s.total)} درس</div></div><div style="width:55%"><div class="bar" title="${s.pct}%"><i style="width:${s.pct}%"></i></div></div><b>${N(s.pct)}%</b></div>`).join('')}</div>
+    <h2>تقدّم الطلاب</h2><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>عام</th>${SECS.map(x => `<th>${x.icon}</th>`).join('')}</tr></thead><tbody>${students.map(s => `<tr><td><b>${E(s.n)}</b></td><td>${s.lv}</td><td><div class="bar" title="${prog(s).pct}%"><i style="width:${prog(s).pct}%"></i></div></td>${SECS.map(x => {
+      const it = D.items.filter(i => i.sec === x.id);
+      const c = it.filter(i => done[s.id].has(i.id)).length, p = it.length ? Math.round(c / it.length * 100) : 0;
+      return `<td><div class="bar" title="${p}%"><i style="width:${p}%"></i></div></td>`;
+    }).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 /* ---------- Student views ---------- */
