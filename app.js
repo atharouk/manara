@@ -15,8 +15,9 @@ const E = s => String(s).replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>'
 const sh = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
 const auth = $('#auth');
-let students = [], done = {}, assigns = [];
-let mode = 'T', sid = null, view = {p: 'home'}, user = null;
+let students = [], done = {}, assigns = [], roles = [];
+let mode = 'T', sid = null, view = {p: 'home'}, user = null, role = 'teacher';
+const isTeacher = () => role === 'teacher';
 
 function toast(t) {
   const e = $('#toast');
@@ -28,19 +29,26 @@ function toast(t) {
 
 /* ---------- Supabase layer ---------- */
 async function loadData() {
-  const [{data: st, error: e1}, {data: cp, error: e2}, {data: as, error: e3}] = await Promise.all([
+  const [{data: st, error: e1}, {data: cp, error: e2}, {data: as, error: e3}, {data: ro, error: e4}] = await Promise.all([
     sb.from('students').select('*').order('id'),
     sb.from('completions').select('*'),
-    sb.from('assignments').select('*').order('created_at')
+    sb.from('assignments').select('*').order('created_at'),
+    sb.from('user_roles').select('user_id, role, student_id, email')
   ]);
-  if (e1 || e2 || e3) {
-    console.error(e1 || e2 || e3);
+  if (e1 || e2 || e3 || e4) {
+    console.error(e1 || e2 || e3 || e4);
     toast('تعذّر تحميل البيانات من Supabase');
   }
   students = (st || []).map(r => ({id: r.id, n: r.name, lv: r.level}));
+  roles = ro || [];
   done = Object.fromEntries(students.map(s => [s.id, new Set()]));
   (cp || []).forEach(r => { if (done[r.student_id]) done[r.student_id].add(r.lesson_id); });
   assigns = (as || []).map(r => ({dbId: r.id, id: r.lesson_id, to: r.target, due: r.due || 'بلا موعد'}));
+  // الطالب لا يستطيع تبديل الهوية: حسابه مرتبط بسجل طالب واحد
+  if (!isTeacher()) {
+    const mine = roles.find(r => r.user_id === user?.id && r.role === 'student');
+    if (mine?.student_id) sid = mine.student_id;
+  }
   if (!students.find(s => s.id === sid)) sid = students[0]?.id || null;
 }
 
@@ -126,6 +134,13 @@ function showAuth(msg) {
 }
 async function startApp(u) {
   user = u;
+  const {data: r, error} = await sb.from('user_roles')
+    .select('role, student_id').eq('user_id', u.id).maybeSingle();
+  if (error) { showAuth('تعذّر قراءة دور الحساب: ' + error.message); return; }
+  if (!r) { showAuth('حسابك غير مرتبط بدور. تواصل مع المعلّم.'); return; }
+  role = r.role;
+  mode = isTeacher() ? 'T' : 'S';
+  view = {p: 'home'};
   auth.hidden = true;
   await loadData();
   render();
@@ -155,9 +170,10 @@ if (supBtn) supBtn.onclick = async () => {
 };
 $('#out').onclick = async () => {
   await sb.auth.signOut();
-  students = []; done = {}; assigns = [];
-  mode = 'T'; sid = null; view = {p: 'home'}; user = null;
+  students = []; done = {}; assigns = []; roles = [];
+  mode = 'T'; sid = null; view = {p: 'home'}; user = null; role = 'teacher';
   showAuth();
+  $('#amsg').textContent = '';
 };
 
 /* ---------- Core navigation ---------- */
@@ -170,9 +186,14 @@ function prog(s) {
 }
 function go(v) { view = v; render(); window.scrollTo(0, 0); }
 function render() {
+  // الطالب لا يصل إلى صفحات المعلّم حتى لو تغيّرت حالة الواجهة
+  if (!isTeacher() && ['students', 'cur', 'tasks', 'reports'].includes(view.p)) view = {p: 'home'};
+  const toggle = isTeacher() ? '' : 'none';
+  $('#bT').style.display = toggle;
+  $('#bS').style.display = toggle;
   $('#bT').classList.toggle('on', mode === 'T');
   $('#bS').classList.toggle('on', mode === 'S');
-  $('#st').style.display = mode === 'S' ? '' : 'none';
+  $('#st').style.display = isTeacher() && mode === 'S' ? '' : 'none';
   $('#st').innerHTML = students.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${E(s.n)}</option>`).join('');
   side();
   ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, quran, sec: ssec, lesson})[view.p]();
@@ -212,12 +233,13 @@ function thome() {
   });
 }
 function tstud() {
-  app.innerHTML = `<h1>الطلاب</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(students.length)} طالب مسجّل</div><button class="btn" id="adds">+ إضافة طالب</button></div><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>التقدم في مستواه</th><th>أنجز</th><th>إجراءات</th></tr></thead><tbody>${students.map(s => {
-    const p = prog(s);
-    return `<tr><td><b>${E(s.n)}</b></td><td><span class="tag">${s.lv}</span></td><td><div class="bar" title="${p.pct}%"><i style="width:${p.pct}%"></i></div></td><td>${N(done[s.id].size)} درساً</td><td class="row" style="gap:4px;flex-wrap:wrap"><button class="btn alt" data-v="${s.id}">عرض</button><button class="btn alt" data-e="${s.id}">تعديل</button><button class="btn alt" data-d="${s.id}">حذف</button></td></tr>`;
+  app.innerHTML = `<h1>الطلاب</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(students.length)} طالب مسجّل · ${N(roles.filter(r => r.role === 'student').length)} حساب طالب</div><button class="btn" id="adds">+ إضافة طالب</button></div><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>التقدم في مستواه</th><th>أنجز</th><th>الحساب</th><th>إجراءات</th></tr></thead><tbody>${students.map(s => {
+    const p = prog(s), acc = roles.find(r => r.student_id === s.id);
+    return `<tr><td><b>${E(s.n)}</b></td><td><span class="tag">${s.lv}</span></td><td><div class="bar" title="${p.pct}%"><i style="width:${p.pct}%"></i></div></td><td>${N(done[s.id].size)} درساً</td><td>${acc ? `<span class="tag">${E(acc.email || 'مربوط')}</span>` : '<span class="m">—</span>'}</td><td class="row" style="gap:4px;flex-wrap:wrap"><button class="btn alt" data-v="${s.id}">عرض</button><button class="btn alt" data-e="${s.id}">تعديل</button><button class="btn alt" data-ac="${s.id}">حساب</button><button class="btn alt" data-d="${s.id}">حذف</button></td></tr>`;
   }).join('')}</tbody></table></div>`;
   app.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { mode = 'S'; sid = b.dataset.v; go({p: 'home'}); });
   app.querySelectorAll('[data-e]').forEach(b => b.onclick = () => studentDlg(b.dataset.e));
+  app.querySelectorAll('[data-ac]').forEach(b => b.onclick = () => accountDlg(b.dataset.ac));
   app.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => {
     const s = students.find(x => x.id === b.dataset.d);
     if (!confirm(`حذف الطالب «${s.n}» وكل إنجازاته؟`)) return;
@@ -249,6 +271,41 @@ function studentDlg(id) {
     toast('تم حفظ الطالب');
     render();
   };
+}
+function accountDlg(id) {
+  const s = students.find(x => x.id === id);
+  const acc = roles.find(r => r.student_id === id);
+  const d = $('#dlg');
+  if (!acc) {
+    d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">حساب ${E(s.n)}</h2><p class="m">سيستطيع الطالب الدخول ومشاهدة تقدّمه ومهامه فقط.</p><label>بريد الطالب</label><input id="ae" type="email" placeholder="student@example.com"><label>كلمة المرور</label><input id="ap" type="password" placeholder="6 أحرف على الأقل"><div class="row" style="margin-top:14px"><button class="btn" id="ok">إنشاء الحساب</button><button class="btn alt" id="x">إلغاء</button></div>`;
+    d.showModal();
+    $('#x').onclick = () => d.close();
+    $('#ok').onclick = async () => {
+      const email = $('#ae').value.trim(), password = $('#ap').value;
+      const {data, error} = await sb.rpc('create_student_account', {p_student_id: id, p_email: email, p_password: password});
+      if (error) { toast(error.message); return; }
+      roles.push({user_id: data, role: 'student', student_id: id, email: email.toLowerCase()});
+      d.close(); toast('تم إنشاء حساب الطالب'); render();
+    };
+  } else {
+    d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">حساب ${E(s.n)}</h2><div class="card"><b>${E(acc.email || '—')}</b><div class="m">حساب طالب مرتبط</div></div><label>كلمة مرور جديدة</label><input id="np" type="password" placeholder="اتركها فارغة للإبقاء على الحالية"><div class="row" style="margin-top:14px;flex-wrap:wrap"><button class="btn" id="rst">تحديث كلمة المرور</button><button class="btn alt" id="rm">إلغاء الربط</button><button class="btn alt" id="x">إغلاق</button></div>`;
+    d.showModal();
+    $('#x').onclick = () => d.close();
+    $('#rst').onclick = async () => {
+      const password = $('#np').value;
+      if (!password) { toast('اكتب كلمة مرور جديدة'); return; }
+      const {error} = await sb.rpc('reset_student_password', {p_student_id: id, p_password: password});
+      if (error) { toast(error.message); return; }
+      d.close(); toast('تم تحديث كلمة المرور');
+    };
+    $('#rm').onclick = async () => {
+      if (!confirm('إلغاء ربط الحساب بالطالب؟ سيُحذف حساب الدخول ويبقى تقدّمه محفوظاً.')) return;
+      const {error} = await sb.rpc('remove_student_account', {p_student_id: id});
+      if (error) { toast(error.message); return; }
+      roles = roles.filter(r => r.student_id !== id);
+      d.close(); toast('تم إلغاء الربط'); render();
+    };
+  }
 }
 function tcur() {
   const sec = view.sec || SECS[0].id;
@@ -310,7 +367,7 @@ function treports() {
 /* ---------- Student views ---------- */
 function shome() {
   const s = me();
-  if (!s) { app.innerHTML = `<div class="card">لا يوجد طلاب بعد. عد إلى وضع المعلّم لتحميل البيانات التجريبية.</div>`; return; }
+  if (!s) { app.innerHTML = `<div class="card">حسابك غير مرتبط بسجل طالب. تواصل مع المعلّم.</div>`; return; }
   const mine = assigns.filter(a => tgt(a).includes(s) && !done[s.id].has(a.id)), n = done[s.id].size;
   app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
   <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(a.due)}</div></div><button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +

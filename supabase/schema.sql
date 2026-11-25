@@ -1,5 +1,6 @@
 -- منارة — مخطط Supabase
--- نفّذ هذا الملف مرة واحدة من: Supabase Dashboard > SQL Editor > New query
+-- نفّذ هذا الملف من: Supabase Dashboard > SQL Editor > New query
+-- آمن لإعادة التنفيذ (idempotent).
 
 create extension if not exists pgcrypto;
 
@@ -29,29 +30,209 @@ create table if not exists public.assignments (
   unique (lesson_id, target)
 );
 
--- الأمان: السماح للمستخدمين المسجّلين فقط (المعلّم)، ومنع الوصول المجهول
+-- أدوار المستخدمين: teacher أو student (مرتبط بسجل طالب)
+create table if not exists public.user_roles (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  role       text not null check (role in ('teacher', 'student')),
+  student_id text references public.students(id) on delete cascade,
+  email      text,
+  created_at timestamptz not null default now()
+);
+alter table public.user_roles add column if not exists email text;
+create unique index if not exists user_roles_student_uidx
+  on public.user_roles (student_id) where student_id is not null;
+
+-- ---------- دوال مساعدة للسياسات (تتجاوز RLS لتجنّب التكرار) ----------
+create or replace function public.is_teacher()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.user_roles r
+    where r.user_id = auth.uid() and r.role = 'teacher'
+  );
+$$;
+
+create or replace function public.my_student_id()
+returns text language sql stable security definer set search_path = public as $$
+  select r.student_id from public.user_roles r
+  where r.user_id = auth.uid() and r.role = 'student'
+  limit 1;
+$$;
+
+-- ---------- إدارة حسابات الطلاب (تنفّذ من الخادم، لا مفتاح سري في المتصفح) ----------
+create or replace function public.create_student_account(
+  p_student_id text, p_email text, p_password text
+) returns text
+language plpgsql security definer set search_path = public, auth, extensions as $$
+declare
+  v_uid uuid;
+  v_email text;
+begin
+  -- عند التنفيذ من SQL Editor يكون auth.uid() فارغاً؛ من المتصفح يجب أن يكون معلّماً
+  if auth.uid() is not null and not public.is_teacher() then
+    raise exception 'غير مسموح بإنشاء حسابات';
+  end if;
+  if not exists (select 1 from public.students where id = p_student_id) then
+    raise exception 'الطالب غير موجود';
+  end if;
+  if exists (select 1 from public.user_roles where student_id = p_student_id) then
+    raise exception 'هذا الطالب مرتبط بحساب بالفعل';
+  end if;
+
+  v_email := lower(trim(p_email));
+  if v_email is null or position('@' in v_email) = 0 then
+    raise exception 'البريد الإلكتروني غير صالح';
+  end if;
+  if length(coalesce(p_password, '')) < 6 then
+    raise exception 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
+  end if;
+  if exists (select 1 from auth.users where email = v_email) then
+    raise exception 'هذا البريد مستخدم بالفعل';
+  end if;
+
+  v_uid := gen_random_uuid();
+
+  -- الحقول النصية الفارغة ضرورية ليتمكن GoTrue من قراءة المستخدم لاحقاً
+  insert into auth.users (
+    instance_id, id, aud, role, email, encrypted_password,
+    email_confirmed_at, created_at, updated_at,
+    raw_user_meta_data, raw_app_meta_data,
+    confirmation_token, recovery_token, email_change_token_new,
+    email_change_token_current, reauthentication_token, phone_change_token,
+    email_change, phone_change
+  ) values (
+    '00000000-0000-0000-0000-000000000000', v_uid, 'authenticated', 'authenticated',
+    v_email, crypt(p_password, gen_salt('bf')), now(), now(), now(),
+    jsonb_build_object('role', 'student', 'student_id', p_student_id),
+    jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
+    '', '', '', '', '', '', '', ''
+  );
+
+  -- email في auth.identities عمود مُولَّد من identity_data في Supabase الحديث
+  insert into auth.identities (
+    id, user_id, provider_id, identity_data, provider,
+    last_sign_in_at, created_at, updated_at
+  ) values (
+    gen_random_uuid(), v_uid, v_uid::text,
+    jsonb_build_object('sub', v_uid::text, 'email', v_email, 'email_verified', true),
+    'email', now(), now(), now()
+  );
+
+  insert into public.user_roles (user_id, role, student_id, email)
+  values (v_uid, 'student', p_student_id, v_email);
+
+  return v_uid::text;
+end;
+$$;
+
+create or replace function public.reset_student_password(
+  p_student_id text, p_password text
+) returns boolean
+language plpgsql security definer set search_path = public, auth, extensions as $$
+declare
+  v_uid uuid;
+begin
+  if auth.uid() is not null and not public.is_teacher() then
+    raise exception 'غير مسموح';
+  end if;
+  if length(coalesce(p_password, '')) < 6 then
+    raise exception 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
+  end if;
+  select user_id into v_uid from public.user_roles
+    where student_id = p_student_id and role = 'student';
+  if v_uid is null then
+    raise exception 'لا يوجد حساب مرتبط بهذا الطالب';
+  end if;
+  update auth.users
+    set encrypted_password = crypt(p_password, gen_salt('bf')), updated_at = now()
+    where id = v_uid;
+  return true;
+end;
+$$;
+
+create or replace function public.remove_student_account(p_student_id text)
+returns boolean
+language plpgsql security definer set search_path = public, auth as $$
+declare
+  v_uid uuid;
+begin
+  if auth.uid() is not null and not public.is_teacher() then
+    raise exception 'غير مسموح';
+  end if;
+  select user_id into v_uid from public.user_roles
+    where student_id = p_student_id and role = 'student';
+  if v_uid is null then
+    raise exception 'لا يوجد حساب مرتبط بهذا الطالب';
+  end if;
+  delete from auth.users where id = v_uid;  -- user_roles تُحذف تلقائياً (on delete cascade)
+  return true;
+end;
+$$;
+
+revoke all on function public.is_teacher() from public, anon;
+revoke all on function public.my_student_id() from public, anon;
+revoke all on function public.create_student_account(text, text, text) from public, anon;
+revoke all on function public.reset_student_password(text, text) from public, anon;
+revoke all on function public.remove_student_account(text) from public, anon;
+grant execute on function public.is_teacher() to authenticated;
+grant execute on function public.my_student_id() to authenticated;
+grant execute on function public.create_student_account(text, text, text) to authenticated;
+grant execute on function public.reset_student_password(text, text) to authenticated;
+grant execute on function public.remove_student_account(text) to authenticated;
+
+-- ---------- الأمان: سياسات RLS ----------
 alter table public.students    enable row level security;
 alter table public.completions enable row level security;
 alter table public.assignments enable row level security;
+alter table public.user_roles  enable row level security;
 
 drop policy if exists "authenticated_full" on public.students;
 drop policy if exists "authenticated_full" on public.completions;
 drop policy if exists "authenticated_full" on public.assignments;
+drop policy if exists "teacher_all" on public.students;
+drop policy if exists "student_self" on public.students;
+drop policy if exists "teacher_all" on public.completions;
+drop policy if exists "student_self" on public.completions;
+drop policy if exists "teacher_all" on public.assignments;
+drop policy if exists "student_self" on public.assignments;
+drop policy if exists "roles_read" on public.user_roles;
 
-create policy "authenticated_full" on public.students
-  for all to authenticated using (true) with check (true);
-create policy "authenticated_full" on public.completions
-  for all to authenticated using (true) with check (true);
-create policy "authenticated_full" on public.assignments
-  for all to authenticated using (true) with check (true);
+create policy "teacher_all" on public.students
+  for all to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "student_self" on public.students
+  for select to authenticated using (id = public.my_student_id());
+
+create policy "teacher_all" on public.completions
+  for all to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "student_self" on public.completions
+  for all to authenticated
+  using (student_id = public.my_student_id())
+  with check (student_id = public.my_student_id());
+
+create policy "teacher_all" on public.assignments
+  for all to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "student_self" on public.assignments
+  for select to authenticated
+  using (target = 'all' or target = public.my_student_id());
+
+create policy "roles_read" on public.user_roles
+  for select to authenticated
+  using (user_id = auth.uid() or public.is_teacher());
 
 revoke all on public.students    from anon;
 revoke all on public.completions from anon;
 revoke all on public.assignments from anon;
+revoke all on public.user_roles  from anon;
 
 grant select, insert, update, delete on public.students    to authenticated;
 grant select, insert, update, delete on public.completions to authenticated;
 grant select, insert, update, delete on public.assignments to authenticated;
+grant select on public.user_roles to authenticated;
+
+-- الحساب التجريبي للمعلّم: يُمنح دور المعلّم تلقائياً
+insert into public.user_roles (user_id, role, email)
+select id, 'teacher', email from auth.users
+where email = 'manara.teacher@example.com'
+on conflict (user_id) do update set role = 'teacher';
 
 -- بيانات تجريبية اختيارية (يمكن حذف هذا القسم في الإنتاج)
 insert into public.students (id, name, level) values
