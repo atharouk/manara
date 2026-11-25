@@ -29,6 +29,8 @@ create table if not exists public.assignments (
   created_at timestamptz not null default now(),
   unique (lesson_id, target)
 );
+-- الموعد الحقيقي للتذكير؛ `due` يبقى نصاً حراً (مثلاً اسم يوم عربي متكرر)
+alter table public.assignments add column if not exists due_date date;
 
 -- أدوار المستخدمين: teacher أو student (مرتبط بسجل طالب)
 create table if not exists public.user_roles (
@@ -252,10 +254,18 @@ insert into public.completions (student_id, lesson_id) values
   ('s6', 'l-1'), ('s6', 'l-2')
 on conflict (student_id, lesson_id) do nothing;
 
-insert into public.assignments (lesson_id, target, due) values
-  ('s-hira', 'all', 'الخميس'),
-  ('t-noon-tanween', 's1', 'السبت')
+insert into public.assignments (lesson_id, target, due, due_date) values
+  ('s-hira', 'all', 'الخميس', current_date + ((4 - extract(isodow from current_date)::int + 7) % 7)),
+  ('t-noon-tanween', 's1', 'السبت', current_date + ((6 - extract(isodow from current_date)::int + 7) % 7))
 on conflict (lesson_id, target) do nothing;
+
+-- إذا كانت المهام التجريبية موجودة من قبل بلا تاريخ، نحسب أقرب موعد للاسم العربي
+update public.assignments
+set due_date = case due
+    when 'الخميس' then current_date + ((4 - extract(isodow from current_date)::int + 7) % 7)
+    when 'السبت'  then current_date + ((6 - extract(isodow from current_date)::int + 7) % 7)
+  end
+where due_date is null and due in ('الخميس', 'السبت');
 
 -- ---------- تلاوات الطلاب: تسجيل صوتي + مراجعة المعلّم ----------
 create table if not exists public.recitations (

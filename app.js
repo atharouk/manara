@@ -39,6 +39,65 @@ const $ = s => document.querySelector(s),
 const E = s => String(s).replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
 const sh = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
+/* ---------- مواعيد المهام وإشعارات الاستحقاق ---------- */
+const DAY_MS = 86400000;
+const DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const DAY_NUM = Object.fromEntries(DAYS.map((n, i) => [n, i]));
+const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const parseDay = s => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s || '')) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+function dueDateOf(a) {
+  const saved = parseDay(a.date);
+  if (saved) return saved;
+  const text = String(a.due || '').trim();
+  if (Object.prototype.hasOwnProperty.call(DAY_NUM, text)) {
+    const now = new Date();
+    return addDays(now, (DAY_NUM[text] - now.getDay() + 7) % 7);
+  }
+  if (text === 'اليوم') return new Date();
+  if (text === 'غداً' || text === 'غدا') return addDays(new Date(), 1);
+  return null;
+}
+function dueInfo(a) {
+  const dt = dueDateOf(a);
+  if (!dt) return {label: E(a.due || 'بلا موعد'), short: E(a.due || 'بلا موعد'), days: null, level: 'none'};
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((dt - today) / DAY_MS);
+  const short = days < 0 ? `متأخرة ${N(-days)} يوم` : days === 0 ? 'اليوم' : days === 1 ? 'غداً' : `بعد ${N(days)} أيام`;
+  const level = days < 0 ? 'late' : days <= 3 ? 'soon' : 'none';
+  return {label: dt.toLocaleDateString('ar-EG', {weekday: 'long', day: 'numeric', month: 'long'}), short, days, level};
+}
+const dueTag = a => {
+  const i = dueInfo(a);
+  return i.level === 'none' ? '' : `<span class="tag ${i.level === 'late' ? 'late' : 'w'}">${E(i.short)}</span>`;
+};
+function nearTasks(forStudent = null) {
+  return assigns.filter(a => {
+    const people = tgt(a);
+    if (forStudent && !people.some(s => s.id === forStudent)) return false;
+    if (!people.some(s => !done[s.id].has(a.id))) return false;
+    const info = dueInfo(a);
+    return info.days !== null && info.days <= 3;
+  }).sort((a, b) => (dueInfo(a).days ?? 99) - (dueInfo(b).days ?? 99));
+}
+function notifyPanel(list, mode = 'plain') {
+  if (!list.length) return '';
+  const rows = list.map(a => {
+    const info = dueInfo(a), left = tgt(a).filter(s => !done[s.id].has(a.id)).length;
+    const action = mode === 'student'
+      ? `<button class="btn alt mini" data-o="${a.id}">ابدأ</button>`
+      : mode === 'teacher' && a === list[0]
+        ? `<button class="btn alt mini" id="gn">عرض المهام</button>` : '';
+    return `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">${E(info.label)} · ${N(left)} متبقٍ</div></div>${dueTag(a)}${action}</div>`;
+  }).join('');
+  return `<div class="card notif"><div class="row"><b>🔔 مهام قريبة الاستحقاق</b><span class="grow"></span><span class="tag w">${N(list.length)}</span></div>${rows}</div>`;
+}
+
 const auth = $('#auth');
 let students = [], done = {}, assigns = [], roles = [], recitations = [];
 let mode = 'T', sid = null, view = {p: 'home'}, user = null, role = 'teacher';
@@ -70,7 +129,7 @@ async function loadData() {
   recitations = rc || [];
   done = Object.fromEntries(students.map(s => [s.id, new Set()]));
   (cp || []).forEach(r => { if (done[r.student_id]) done[r.student_id].add(r.lesson_id); });
-  assigns = (as || []).map(r => ({dbId: r.id, id: r.lesson_id, to: r.target, due: r.due || 'بلا موعد'}));
+  assigns = (as || []).map(r => ({dbId: r.id, id: r.lesson_id, to: r.target, due: r.due || 'بلا موعد', date: r.due_date || null}));
   // الطالب لا يستطيع تبديل الهوية: حسابه مرتبط بسجل طالب واحد
   if (!isTeacher()) {
     const mine = roles.find(r => r.user_id === user?.id && r.role === 'student');
@@ -87,8 +146,15 @@ async function persistCompletion(lessonId) {
 
 async function persistAssign(a) {
   const {error} = await sb.from('assignments')
-    .insert({lesson_id: a.id, target: a.to, due: a.due});
+    .insert({lesson_id: a.id, target: a.to, due: a.due, due_date: a.date || null});
   if (error) { console.error(error); toast('تعذّر حفظ الإسناد: ' + error.message); }
+}
+
+async function updateDue(dbId, text, date) {
+  const {error} = await sb.from('assignments')
+    .update({due: text, due_date: date}).eq('id', dbId);
+  if (error) { console.error(error); toast('تعذّر حفظ الموعد: ' + error.message); return false; }
+  return true;
 }
 
 async function persistPromotion(s) {
@@ -135,8 +201,8 @@ async function seedDemo() {
     s6: ['l-1', 'l-2']
   };
   const demoAssigns = [
-    {lesson_id: 's-hira', target: 'all', due: 'الخميس'},
-    {lesson_id: 't-noon-tanween', target: 's1', due: 'السبت'}
+    {lesson_id: 's-hira', target: 'all', due: 'الخميس', due_date: isoDay(dueDateOf({due: 'الخميس'}))},
+    {lesson_id: 't-noon-tanween', target: 's1', due: 'السبت', due_date: isoDay(dueDateOf({due: 'السبت'}))}
   ];
   const e1 = await sb.from('students').upsert(demoStudents);
   const e2 = await sb.from('completions').upsert(
@@ -230,7 +296,11 @@ function side() {
     ? [['home', 'الرئيسية'], ['students', 'الطلاب'], ['cur', 'المنهج'], ['tasks', 'المهام'], ['reports', 'التقارير'], ['recitations', 'التلاوات'], ['quran', 'القرآن']]
     : [['home', 'الرئيسية'], ['quran', 'القرآن'], ...SECS.map(s => ['sec:' + s.id, s.icon + ' ' + s.t])];
   const cur = view.p === 'sec' ? 'sec:' + view.sec : view.p;
-  $('#side').innerHTML = `<div class="nv">` + it.map(([k, t]) => `<button data-k="${k}" class="${cur === k ? 'on' : ''}">${t}</button>`).join('') + `</div>`;
+  const bells = nearTasks(mode === 'T' ? null : sid).length;
+  $('#side').innerHTML = `<div class="nv">` + it.map(([k, t]) => {
+    const bell = bells && (k === 'home' || k === 'tasks') ? ` <span class="nav-bell">🔔 ${N(bells)}</span>` : '';
+    return `<button data-k="${k}" class="${cur === k ? 'on' : ''}">${t}${bell}</button>`;
+  }).join('') + `</div>`;
   $('#side').querySelectorAll('button').forEach(b => b.onclick = () => {
     const k = b.dataset.k;
     go(k.startsWith('sec:') ? {p: 'sec', sec: k.slice(4)} : {p: k});
@@ -244,15 +314,18 @@ $('#st').onchange = e => { sid = e.target.value; go({p: 'home'}); };
 function thome() {
   const rd = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم');
   const pending = recitations.filter(r => r.status === 'pending').length;
+  const soon = nearTasks();
   const tot = assigns.reduce((a, x) => a + tgt(x).length, 0),
         dn = assigns.reduce((a, x) => a + tgt(x).filter(s => done[s.id].has(x.id)).length, 0);
   app.innerHTML = `<h1>أهلاً بك يا معلم</h1><div class="stats"><div class="card stat"><b>${N(students.length)}</b><span>طالب</span></div><div class="card stat"><b>${N(assigns.length)}</b><span>مهمة مُسندة</span></div><div class="card stat"><b>${N(dn)} / ${N(tot)}</b><span>تسليمات أُنجزت</span></div><div class="card stat"><b>${N(rd.length)}</b><span>جاهزون للترقية</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div></div>` +
     (pending ? `<div class="card" style="border:2px solid var(--lamp)"><b>${N(pending)} تلاوة بانتظار المراجعة</b><p class="m" style="margin:4px 0 8px">استمع إليها واعتمدها أو اطلب إعادة التسجيل.</p><button class="btn lamp" id="gr">فتح التلاوات</button></div>` : '') +
+    notifyPanel(soon, 'teacher') +
     (rd.length ? `<div class="card" style="border:2px solid var(--lamp)"><b>أنهوا معظم مستواهم</b>${rd.map(s => `<div class="row" style="margin-top:6px"><span class="grow">${E(s.n)} (${prog(s).pct}%)</span><button class="btn lamp" data-up="${s.id}">ترقية إلى ${LV[LV.indexOf(s.lv) + 1]}</button></div>`).join('')}</div>` : '') +
     (students.length ? `<div class="card"><p style="margin:0 0 10px">من «المنهج» تعاين الدروس وتسندها، ومن «الطلاب» ترى تقدم كل طالب.</p><button class="btn" id="g1">فتح المنهج</button></div>`
       : `<div class="card"><p style="margin:0 0 10px">لا يوجد طلاب بعد. يمكنك البدء بالبيانات التجريبية.</p><button class="btn" id="seed">تحميل بيانات تجريبية</button></div>`);
   if ($('#g1')) $('#g1').onclick = () => go({p: 'cur'});
   if ($('#gr')) $('#gr').onclick = () => go({p: 'recitations'});
+  if ($('#gn')) $('#gn').onclick = () => go({p: 'tasks'});
   if ($('#seed')) $('#seed').onclick = seedDemo;
   app.querySelectorAll('[data-up]').forEach(b => b.onclick = () => {
     const s = students.find(x => x.id === b.dataset.up);
@@ -347,23 +420,51 @@ function tcur() {
 }
 function assign(id) {
   const d = $('#dlg');
-  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">إسناد: ${E(IT[id].t)}</h2><label>إلى</label><select id="to"><option value="all">كل الطلاب</option>${students.map(s => `<option value="${s.id}">${E(s.n)} (${s.lv})</option>`).join('')}</select><label>الموعد</label><input id="due" type="text" placeholder="مثلاً: الخميس"><div class="row" style="margin-top:14px"><button class="btn" id="ok">إسناد</button><button class="btn alt" id="x">إلغاء</button></div>`;
+  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">إسناد: ${E(IT[id].t)}</h2><label>إلى</label><select id="to"><option value="all">كل الطلاب</option>${students.map(s => `<option value="${s.id}">${E(s.n)} (${s.lv})</option>`).join('')}</select>` +
+    `<label>التاريخ (للتذكير التلقائي)</label><input id="dd" type="date">` +
+    `<label>نص الموعد (اختياري، يقبل اسماً مثل الخميس)</label><input id="due" type="text" placeholder="مثلاً: الخميس"><div class="row" style="margin-top:14px"><button class="btn" id="ok">إسناد</button><button class="btn alt" id="x">إلغاء</button></div>`;
   d.showModal();
   $('#x').onclick = () => d.close();
   $('#ok').onclick = () => {
-    const a = {id, to: $('#to').value, due: $('#due').value || 'بلا موعد'};
+    const date = $('#dd').value || null;
+    const typed = $('#due').value.trim();
+    const dt = date ? parseDay(date) : dueDateOf({due: typed});
+    const due = date ? DAYS[dt.getDay()] : (typed || (dt ? DAYS[dt.getDay()] : 'بلا موعد'));
+    const a = {id, to: $('#to').value, due, date: dt ? isoDay(dt) : null};
     assigns.push(a);
     d.close();
-    toast('تم الإسناد');
+    toast('تم الإسناد مع الموعد');
     go({p: 'tasks'});
     persistAssign(a);
   };
 }
+
+function dueDlg(dbId) {
+  const a = assigns.find(x => x.dbId === dbId);
+  if (!a) return;
+  const current = dueDateOf(a);
+  const d = $('#dlg');
+  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">تعديل موعد: ${E(IT[a.id].t)}</h2><label>التاريخ</label><input id="ed" type="date" value="${current ? isoDay(current) : ''}">` +
+    `<label>نص الموعد (اختياري)</label><input id="et" type="text" value="${E(a.due === 'بلا موعد' ? '' : a.due)}" placeholder="مثلاً: الخميس"><div class="row" style="margin-top:14px"><button class="btn" id="ok">حفظ</button><button class="btn alt" id="x">إلغاء</button></div>`;
+  d.showModal();
+  $('#x').onclick = () => d.close();
+  $('#ok').onclick = async () => {
+    const date = $('#ed').value || null;
+    const typed = $('#et').value.trim();
+    const dt = date ? parseDay(date) : dueDateOf({due: typed});
+    const text = date ? DAYS[dt.getDay()] : (typed || (dt ? DAYS[dt.getDay()] : 'بلا موعد'));
+    if (!await updateDue(dbId, text, dt ? isoDay(dt) : null)) return;
+    Object.assign(a, {due: text, date: dt ? isoDay(dt) : null});
+    d.close(); toast('تم تحديث الموعد'); render();
+  };
+}
 function ttasks() {
-  app.innerHTML = `<h1>المهام</h1>` + (assigns.length ? assigns.map(a => {
-    const t = tgt(a), n = t.filter(s => done[s.id].has(a.id)).length;
-    return `<div class="card it"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">إلى: ${a.to === 'all' ? 'كل الطلاب' : E(t[0]?.n || '—')} · الموعد: ${E(a.due)}</div></div><span class="tag">${N(n)} / ${N(t.length)} سلّموا</span><button class="btn alt" data-del="${a.dbId}">حذف</button></div>`;
-  }).join('') : `<div class="card">لا توجد مهام بعد.</div>`);
+  app.innerHTML = `<h1>المهام</h1>` + notifyPanel(nearTasks()) +
+    (assigns.length ? assigns.map(a => {
+      const t = tgt(a), n = t.filter(s => done[s.id].has(a.id)).length, info = dueInfo(a);
+      const label = info.days === null ? E(a.due) : E(info.label) + (a.due && a.due !== DAYS[parseDay(a.date)?.getDay()] && info.label.indexOf(a.due) < 0 ? ` (${E(a.due)})` : '');
+      return `<div class="card it"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">إلى: ${a.to === 'all' ? 'كل الطلاب' : E(t[0]?.n || '—')} · الموعد: ${label}</div></div>${dueTag(a)}<span class="tag">${N(n)} / ${N(t.length)} سلّموا</span><button class="btn alt" data-edue="${a.dbId}">تعديل الموعد</button><button class="btn alt" data-del="${a.dbId}">حذف</button></div>`;
+    }).join('') : `<div class="card">لا توجد مهام بعد.</div>`);
   app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
     if (!confirm('حذف هذه المهمة؟')) return;
     if (await removeAssign(+b.dataset.del)) {
@@ -372,6 +473,7 @@ function ttasks() {
       render();
     }
   });
+  app.querySelectorAll('[data-edue]').forEach(b => b.onclick = () => dueDlg(+b.dataset.edue));
 }
 
 function reportData() {
@@ -442,13 +544,15 @@ function shome() {
   const s = me();
   if (!s) { app.innerHTML = `<div class="card">حسابك غير مرتبط بسجل طالب. تواصل مع المعلّم.</div>`; return; }
   const mine = assigns.filter(a => tgt(a).includes(s) && !done[s.id].has(a.id)), n = done[s.id].size;
+  const soon = nearTasks(s.id);
   const myRec = recitations.filter(r => r.student_id === s.id);
   const pend = myRec.filter(r => r.status !== 'approved');
   const recOk = myRec.filter(r => r.status === 'approved').length;
   const recWait = myRec.filter(r => r.status === 'pending').length, recRev = myRec.filter(r => r.status === 'review').length;
   app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
+  ${notifyPanel(soon, 'student')}
   ${pend.length ? `<h2>تلاوات تحتاج متابعة</h2>` + pend.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">أُرسلت ${new Date(r.created_at).toLocaleString('ar-EG')}</div></div><button class="btn alt" data-rd="${r.id}">🗑️ حذف</button></div>`).join('') : ''}
-  <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(a.due)}</div></div><button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +
+  <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(dueInfo(a).label)}</div></div>${dueTag(a)}<button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +
     `<h2>موادي</h2><div class="grid">${SECS.map(x => {
       const it = D.items.filter(i => i.sec === x.id && LV.indexOf(i.lv) <= LV.indexOf(s.lv));
       return `<button class="sub" data-sec="${x.id}"><span class="em">${x.icon}</span><b>${x.t}</b><div class="m">${N(it.filter(i => done[s.id].has(i.id)).length)} / ${N(it.length)}</div></button>`;
