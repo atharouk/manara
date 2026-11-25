@@ -2,6 +2,12 @@
 
 نسخة مطوّرة من النموذج الأولي: تسجيل دخول للمعلّم، حفظ تقدّم الطلاب والمهام في Supabase، ونشر ثابت على Vercel عبر GitHub.
 
+> **الرابط المباشر:** https://manara-atharok1.vercel.app
+>
+> **المستودع:** https://github.com/atharouk/manara
+>
+> **حساب المعلّم التجريبي:** `manara.teacher@example.com` — كلمة المرور: `Manara@2026`
+
 ## البنية
 
 | الملف | الوظيفة |
@@ -40,21 +46,20 @@ python -m http.server 8000
 
 ثم افتح `http://localhost:8000`.
 
-## 3) GitHub + Vercel
+## 3) GitHub + Vercel (تم)
+
+تم إنشاء المستودع وربطه بـ Vercel. كل `git push` على فرع `main` يعيد النشر تلقائياً.
 
 ```powershell
-git init
 git add .
-git commit -m "Manara: Supabase-backed prototype"
-git remote add origin https://github.com/<USER>/<REPO>.git
-git push -u origin main
+git commit -m "وصف التغيير"
+git push origin main
 ```
 
-في Vercel:
-1. **Add New → Project** واستورد المستودع.
-2. Framework Preset: **Other** (أو Static).
-3. لا تحتاج متغيرات بيئة؛ الإعداد في `config.js`.
-4. **Deploy**.
+إعدادات Vercel الحالية:
+- Framework Preset: **Other** (موقع ثابت، بلا خطوة بناء).
+- لا متغيرات بيئة؛ الإعداد في `config.js`.
+- Production URL: `manara-atharok1.vercel.app`.
 
 ## 4) ما الذي تحوّل إلى سحابي؟
 
