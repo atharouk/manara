@@ -447,7 +447,7 @@ function shome() {
   const recOk = myRec.filter(r => r.status === 'approved').length;
   const recWait = myRec.filter(r => r.status === 'pending').length, recRev = myRec.filter(r => r.status === 'review').length;
   app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
-  ${pend.length ? `<h2>تلاوات تحتاج متابعة</h2>` + pend.map(r => `<div class="card task"><div class="grow"><b>${N(r.surah)}. ${E(D.q[r.surah - 1]?.name || r.surah)} — الآية ${N(r.ayah)}</b> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">أُرسلت ${new Date(r.created_at).toLocaleString('ar-EG')}</div></div><button class="btn alt" data-rd="${r.id}">🗑️ حذف</button></div>`).join('') : ''}
+  ${pend.length ? `<h2>تلاوات تحتاج متابعة</h2>` + pend.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">أُرسلت ${new Date(r.created_at).toLocaleString('ar-EG')}</div></div><button class="btn alt" data-rd="${r.id}">🗑️ حذف</button></div>`).join('') : ''}
   <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(a.due)}</div></div><button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +
     `<h2>موادي</h2><div class="grid">${SECS.map(x => {
       const it = D.items.filter(i => i.sec === x.id && LV.indexOf(i.lv) <= LV.indexOf(s.lv));
@@ -546,17 +546,21 @@ const RECITERS = [
   ['ar.minshawi', 'محمد صديق المنشاوي']
 ];
 const RECT = {pending: 'قيد المراجعة', approved: 'مقبولة', review: 'تحتاج إعادة'};
+const recWhere = r => `${N(r.surah)}. ${E(D.q[r.surah - 1]?.name || r.surah)} — ${r.scope === 'surah' ? 'السورة كاملة' : 'الآية ' + N(r.ayah)}`;
 
-/* ---------- تسجيل تلاوة الطالب ---------- */
-function reciteDlg(surah, ayah, surahName) {
-  const d = $('#dlg');
-  const cand = lessonsFor(surah, ayah);
+/* ---------- تسجيل تلاوة الطالب (آية أو سورة كاملة) ---------- */
+function reciteDlg(surah, ayah, surahName, scope = 'ayah') {
+  const d = $('#dlg'), full = scope === 'surah';
+  const len = D.q[surah - 1]?.v.length || 1;
+  const cand = full
+    ? [...new Set(Array.from({length: len}, (_, i) => lessonsFor(surah, i + 1)).flat())]
+    : lessonsFor(surah, ayah);
   const def = cand.find(id => !done[sid]?.has(id)) || '';
   const options = `<option value="">بدون ربط بدرس</option>` + cand.map(id =>
     `<option value="${id}" ${id === def ? 'selected' : ''}>${E(IT[id].t)}${done[sid]?.has(id) ? ' (منجز)' : ''}</option>`).join('');
-  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">تسجيل تلاوة</h2><p class="m">${E(surahName)} — الآية ${N(ayah)}</p>` +
+  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">${full ? 'تسجيل السورة كاملة' : 'تسجيل تلاوة'}</h2><p class="m">${E(surahName)} — ${full ? 'السورة كاملة' : 'الآية ' + N(ayah)}</p>` +
     `<p class="m" style="margin:6px 0">الدرس المرتبط (يُضاف لسجل الإنجاز بعد اعتماد المعلّم):</p><select id="rlesson" style="width:100%;max-width:420px;margin-bottom:10px">${options}</select>` +
-    `<div class="card" id="rstat">اضغط «ابدأ التسجيل» ثم تلا الآية بصوت واضح.</div><div class="row" style="margin-top:14px;flex-wrap:wrap"><button class="btn" id="rgo">ابدأ التسجيل</button><button class="btn alt" id="rsend" disabled>إرسال للمعلّم</button><button class="btn alt" id="rx">إغلاق</button></div>`;
+    `<div class="card" id="rstat">اضغط «ابدأ التسجيل» ثم ${full ? 'تلا السورة من أولها إلى آخرها' : 'تلا الآية'} بصوت واضح.</div><div class="row" style="margin-top:14px;flex-wrap:wrap"><button class="btn" id="rgo">ابدأ التسجيل</button><button class="btn alt" id="rsend" disabled>إرسال للمعلّم</button><button class="btn alt" id="rx">إغلاق</button></div>`;
   d.showModal();
   const stat = $('#rstat'), goBtn = $('#rgo'), sendBtn = $('#rsend');
   let mr = null, stream = null, chunks = [], blob = null;
@@ -581,7 +585,8 @@ function reciteDlg(surah, ayah, surahName) {
         goBtn.textContent = 'إعادة التسجيل';
       };
       rec.start();
-      stat.textContent = 'جارٍ التسجيل... اقرأ الآية ثم اضغط «إيقاف التسجيل».';
+      stat.textContent = full ? 'جارٍ التسجيل... تلا السورة ثم اضغط «إيقاف التسجيل».'
+        : 'جارٍ التسجيل... اقرأ الآية ثم اضغط «إيقاف التسجيل».';
       goBtn.textContent = 'إيقاف التسجيل';
     } catch (err) {
       stat.textContent = 'تعذّر التسجيل: ' + err.message;
@@ -591,12 +596,12 @@ function reciteDlg(surah, ayah, surahName) {
   sendBtn.onclick = async () => {
     if (!blob || !sid) return;
     sendBtn.disabled = true;
-    const path = `${sid}/${surah}-${ayah}-${Date.now()}.${ext(blob.type)}`;
+    const path = `${sid}/${surah}-${full ? 'full' : ayah}-${Date.now()}.${ext(blob.type)}`;
     const {error: ue} = await sb.storage.from('recitations').upload(path, blob, {contentType: (blob.type || 'audio/webm').split(';')[0], upsert: false});
     if (ue) { toast('تعذّر رفع التلاوة: ' + ue.message); sendBtn.disabled = false; return; }
     const {data, error: ie} = await sb.from('recitations')
-      .insert({student_id: sid, surah, ayah, storage_path: path, status: 'pending',
-               lesson_id: $('#rlesson').value || null})
+      .insert({student_id: sid, surah, ayah: full ? 1 : ayah, scope,
+               storage_path: path, status: 'pending', lesson_id: $('#rlesson').value || null})
       .select().single();
     if (ie) {
       await sb.storage.from('recitations').remove([path]);
@@ -629,9 +634,8 @@ function trec() {
   app.innerHTML = `<h1>التلاوات</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(list.length)} تسجيل · ${N(pending)} بانتظار المراجعة</div><button class="btn alt" id="rf">تحديث</button></div>` +
     (list.length ? list.map(r => {
       const s = students.find(x => x.id === r.student_id);
-      const sur = D.q[r.surah - 1]?.name || N(r.surah);
       const ln = r.lesson_id ? (IT[r.lesson_id]?.t || r.lesson_id) : '';
-      return `<div class="card"><div class="row"><div class="grow"><b>${E(s?.n || r.student_id)}</b> <span class="tag">${N(r.surah)}. ${E(sur)} — الآية ${N(r.ayah)}</span>${ln ? ` <span class="tag">📘 ${E(ln)}</span>` : ''} <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">${new Date(r.created_at).toLocaleString('ar-EG')}${r.teacher_note ? ' · ' + E(r.teacher_note) : ''}</div></div></div><audio controls data-rec="${r.id}" style="width:100%;margin:10px 0"></audio><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn" data-ap="${r.id}">اعتماد</button><button class="btn alt" data-rv="${r.id}">يحتاج إعادة</button></div></div>`;
+      return `<div class="card"><div class="row"><div class="grow"><b>${E(s?.n || r.student_id)}</b> <span class="tag">${recWhere(r)}</span>${ln ? ` <span class="tag">📘 ${E(ln)}</span>` : ''} <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">${new Date(r.created_at).toLocaleString('ar-EG')}${r.teacher_note ? ' · ' + E(r.teacher_note) : ''}</div></div></div><audio controls data-rec="${r.id}" style="width:100%;margin:10px 0"></audio><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn" data-ap="${r.id}">اعتماد</button><button class="btn alt" data-rv="${r.id}">يحتاج إعادة</button></div></div>`;
     }).join('') : `<div class="card">لا توجد تلاوات بعد. يستطيع الطالب تسجيل تلاوته من صفحة القرآن.</div>`);
   $('#rf').onclick = () => loadData().then(render);
   list.forEach(async r => {
@@ -703,6 +707,9 @@ function quran() {
 
   function draw() {
     const s = D.q[n - 1];
+    const surRec = !isTeacher() && sid
+      ? recitations.filter(r => r.student_id === sid && r.surah === n && r.scope === 'surah').slice(-1)[0]
+      : null;
     const base = D.q.slice(0, n - 1).reduce((a, x) => a + x.v.length, 0);
     keys = s.v.map((_, i) => ({g: base + i + 1, key: 'ay' + i}));
     app.innerHTML = `<h1>القرآن (رواية حفص)</h1>
@@ -712,10 +719,11 @@ function quran() {
         <label>السرعة <select id="rt" aria-label="سرعة التلاوة">${[0.75, 1, 1.25, 1.5].map(v => `<option value="${v}" ${v === rate ? 'selected' : ''}>${v}×</option>`).join('')}</select></label>
         <label><input type="checkbox" id="au" ${auto ? 'checked' : ''}> تتابع تلقائي</label>
         <button class="btn alt" id="plall">▶ تلاوة السورة</button><button class="btn alt" id="stp">■ إيقاف</button>
+        ${!isTeacher() && sid ? `<button class="btn" id="rsur">🎙️ تسجيل السورة كاملة</button>${surRec ? `<span class="tag">${RECT[surRec.status] || surRec.status}</span>${surRec.status !== 'approved' ? `<button class="btn alt mini" id="drs" title="حذف تسجيل السورة">🗑️</button>` : ''}` : ''}` : ''}
         <label style="margin-inline-start:auto"><input type="checkbox" id="hd" ${hide ? 'checked' : ''}> وضع الحفظ: إخفاء الآيات (اضغط على الآية لإظهارها)</label>
       </div>
       <div class="card ar qtxt" id="qt" style="margin-top:12px"></div>
-      <p class="note">نص القرآن: مشروع Tanzil (tanzil.net)، رواية حفص، دون أي تعديل. التلاوة من خدمة التلاوة القرآنية (cdn.islamic.network) بالقارئ المختار، وتحتاج اتصالاً بالإنترنت. للطالب: زر 🎙️ بجانب كل آية يرسل تسجيله إلى المعلّم للمراجعة، ويمكن ربطه بدرس يُضاف تلقائياً لسجل الإنجاز عند الاعتماد. لم تُراجَع النصوص بعد من مختص.</p>`;
+      <p class="note">نص القرآن: مشروع Tanzil (tanzil.net)، رواية حفص، دون أي تعديل. التلاوة من خدمة التلاوة القرآنية (cdn.islamic.network) بالقارئ المختار، وتحتاج اتصالاً بالإنترنت. للطالب: زر 🎙️ بجانب كل آية، أو «🎙️ تسجيل السورة كاملة» أعلى الصفحة، يرسل التسجيل إلى المعلّم للمراجعة، ويمكن ربطه بدرس يُضاف تلقائياً لسجل الإنجاز عند الاعتماد. لم تُراجَع النصوص بعد من مختص.</p>`;
     const qt = $('#qt');
     if (n !== 1 && n !== 9) {
       const wrap = document.createElement('div'); wrap.className = 'row basm-row';
@@ -736,7 +744,7 @@ function quran() {
         rb.onclick = () => reciteDlg(n, i + 1, s.name);
         row.appendChild(rb);
       }
-      const mine = recitations.filter(r => r.surah === n && r.ayah === i + 1).slice(-1)[0];
+      const mine = recitations.filter(r => r.surah === n && r.ayah === i + 1 && r.scope !== 'surah').slice(-1)[0];
       if (mine) {
         const tag = document.createElement('span'); tag.className = 'tag'; tag.style.alignSelf = 'center'; tag.textContent = RECT[mine.status] || mine.status;
         row.appendChild(tag);
@@ -758,6 +766,8 @@ function quran() {
     $('#hd').onchange = e => { hide = e.target.checked; draw(); };
     $('#plall').onclick = () => { if (keys[0]) play(keys[0].g, keys[0].key); };
     $('#stp').onclick = stop;
+    if ($('#rsur')) $('#rsur').onclick = () => reciteDlg(n, 1, s.name, 'surah');
+    if ($('#drs')) $('#drs').onclick = () => deleteRecitation(surRec.id);
     sync();
   }
   draw();

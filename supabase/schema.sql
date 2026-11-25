@@ -352,6 +352,11 @@ create trigger recitations_approved_completion
   after insert or update of status on public.recitations
   for each row execute function public.recitation_approved_completion();
 
+-- ---------- تسجيل السورة كاملة إلى جانب تسجيل الآية ----------
+-- scope = 'ayah' (افتراضي) أو 'surah'؛ في الحالة الثانية يُخزَّن ayah = 1 ويُعرض «السورة كاملة»
+alter table public.recitations add column if not exists scope text not null default 'ayah'
+  check (scope in ('ayah', 'surah'));
+
 -- ---------- حذف الطالب لتلاوته قبل اعتماد المعلّم ----------
 drop policy if exists "student_delete_pending" on public.recitations;
 create policy "student_delete_pending" on public.recitations
