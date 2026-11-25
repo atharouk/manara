@@ -165,6 +165,53 @@ function wireLate() {
   });
 }
 
+/* ---------- إعادات التلاوات بعد مراجعة المعلّم ---------- */
+function redoRequests(forStudent = null) {
+  const out = [];
+  recitations.filter(r => r.status === 'review').forEach(r => {
+    if (forStudent && r.student_id !== forStudent) return;
+    const since = new Date(r.reviewed_at || r.created_at).getTime();
+    // تسجيل جديد لنفس الآية/السورة بعد طلب الإعادة يُعدّ استجابةً للطالب
+    const answered = recitations.some(x => x.student_id === r.student_id && x.id !== r.id &&
+      new Date(x.created_at).getTime() > since &&
+      ((x.scope === r.scope && x.surah === r.surah && (r.scope === 'surah' || x.ayah === r.ayah)) ||
+       (r.scope === 'ayah' && x.scope === 'surah' && x.surah === r.surah)));
+    if (answered) return;
+    const day = new Date(since); day.setHours(0, 0, 0, 0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    out.push({r, s: students.find(z => z.id === r.student_id),
+      days: Math.max(0, Math.round((today - day) / DAY_MS))});
+  });
+  return out.sort((a, b) => b.days - a.days);
+}
+function redoPanel(list, mode = 'plain') {
+  if (!list.length) return '';
+  const rows = list.map(x => {
+    const note = x.r.teacher_note ? E(x.r.teacher_note) : '';
+    const title = mode === 'student' ? recWhere(x.r) : E(x.s?.n || x.r.student_id);
+    const detail = mode === 'student'
+      ? `${note ? note + ' · ' : ''}اطلب المعلّم إعادة التسجيل · لم تُعِد بعد`
+      : `${recWhere(x.r)}${note ? ' · ' + note : ''} · لم يُعِد بعد`;
+    const wait = x.days ? `<span class="tag w">منذ ${N(x.days)} يوم</span>` : '<span class="tag w">اليوم</span>';
+    const action = mode === 'student'
+      ? `<button class="btn alt mini" data-redo="${x.r.id}">🎙️ إعادة التسجيل</button>`
+      : `<button class="btn alt mini" data-redov="${x.r.student_id}">عرض الطالب</button>`;
+    return `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${title}</b><div class="m">${detail}</div></div>${wait}${action}</div>`;
+  }).join('');
+  return `<div class="card notif retry"><div class="row"><b>🔁 إعادات مطلوبة بعد المراجعة</b><span class="grow"></span><span class="tag w">${N(list.length)}</span></div>${rows}</div>`;
+}
+function wireRedo() {
+  app.querySelectorAll('[data-redov]').forEach(b => b.onclick = () => {
+    mode = 'S'; sid = b.dataset.redov; go({p: 'home'});
+  });
+  app.querySelectorAll('[data-redo]').forEach(b => b.onclick = () => {
+    const r = recitations.find(x => x.id === +b.dataset.redo);
+    if (!r) return;
+    if (view.p !== 'quran' || view.n !== r.surah) go({p: 'quran', n: r.surah});
+    reciteDlg(r.surah, r.scope === 'surah' ? 1 : r.ayah, D.q[r.surah - 1]?.name || '', r.scope);
+  });
+}
+
 const auth = $('#auth');
 let students = [], done = {}, assigns = [], roles = [], recitations = [];
 let mode = 'T', sid = null, view = {p: 'home'}, user = null, role = 'teacher';
@@ -366,11 +413,14 @@ function side() {
   const cur = view.p === 'sec' ? 'sec:' + view.sec : view.p;
   const near = nearTasks(mode === 'T' ? null : sid).length;
   const late = lateRecitations(mode === 'T' ? null : sid).length;
+  const redo = redoRequests(mode === 'T' ? null : sid).length;
   $('#side').innerHTML = `<div class="nv">` + it.map(([k, t]) => {
     let bell = '';
     if (near && (k === 'home' || k === 'tasks')) bell += ` <span class="nav-bell">🔔 ${N(near)}</span>`;
     if (late && (k === 'home' || k === 'tasks' || (mode === 'S' && k === 'quran')))
       bell += ` <span class="nav-bell late">⏰ ${N(late)}</span>`;
+    if (redo && (k === 'home' || (mode === 'T' ? k === 'recitations' : (!isTeacher() && k === 'quran'))))
+      bell += ` <span class="nav-bell retry">🔁 ${N(redo)}</span>`;
     return `<button data-k="${k}" class="${cur === k ? 'on' : ''}">${t}${bell}</button>`;
   }).join('') + `</div>`;
   $('#side').querySelectorAll('button').forEach(b => b.onclick = () => {
@@ -386,13 +436,14 @@ $('#st').onchange = e => { sid = e.target.value; go({p: 'home'}); };
 function thome() {
   const rd = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم');
   const pending = recitations.filter(r => r.status === 'pending').length;
-  const soon = nearTasks(), late = lateRecitations();
+  const soon = nearTasks(), late = lateRecitations(), redo = redoRequests();
   const tot = assigns.reduce((a, x) => a + tgt(x).length, 0),
         dn = assigns.reduce((a, x) => a + tgt(x).filter(s => done[s.id].has(x.id)).length, 0);
-  app.innerHTML = `<h1>أهلاً بك يا معلم</h1><div class="stats"><div class="card stat"><b>${N(students.length)}</b><span>طالب</span></div><div class="card stat"><b>${N(assigns.length)}</b><span>مهمة مُسندة</span></div><div class="card stat"><b>${N(dn)} / ${N(tot)}</b><span>تسليمات أُنجزت</span></div><div class="card stat"><b>${N(rd.length)}</b><span>جاهزون للترقية</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div></div>` +
+  app.innerHTML = `<h1>أهلاً بك يا معلم</h1><div class="stats"><div class="card stat"><b>${N(students.length)}</b><span>طالب</span></div><div class="card stat"><b>${N(assigns.length)}</b><span>مهمة مُسندة</span></div><div class="card stat"><b>${N(dn)} / ${N(tot)}</b><span>تسليمات أُنجزت</span></div><div class="card stat"><b>${N(rd.length)}</b><span>جاهزون للترقية</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div><div class="card stat"><b>${N(redo.length)}</b><span>إعادات مطلوبة</span></div></div>` +
     (pending ? `<div class="card" style="border:2px solid var(--lamp)"><b>${N(pending)} تلاوة بانتظار المراجعة</b><p class="m" style="margin:4px 0 8px">استمع إليها واعتمدها أو اطلب إعادة التسجيل.</p><button class="btn lamp" id="gr">فتح التلاوات</button></div>` : '') +
     notifyPanel(soon, 'teacher') +
     lateRecPanel(late) +
+    redoPanel(redo) +
     (rd.length ? `<div class="card" style="border:2px solid var(--lamp)"><b>أنهوا معظم مستواهم</b>${rd.map(s => `<div class="row" style="margin-top:6px"><span class="grow">${E(s.n)} (${prog(s).pct}%)</span><button class="btn lamp" data-up="${s.id}">ترقية إلى ${LV[LV.indexOf(s.lv) + 1]}</button></div>`).join('')}</div>` : '') +
     (students.length ? `<div class="card"><p style="margin:0 0 10px">من «المنهج» تعاين الدروس وتسندها، ومن «الطلاب» ترى تقدم كل طالب.</p><button class="btn" id="g1">فتح المنهج</button></div>`
       : `<div class="card"><p style="margin:0 0 10px">لا يوجد طلاب بعد. يمكنك البدء بالبيانات التجريبية.</p><button class="btn" id="seed">تحميل بيانات تجريبية</button></div>`);
@@ -400,7 +451,7 @@ function thome() {
   if ($('#gr')) $('#gr').onclick = () => go({p: 'recitations'});
   if ($('#gn')) $('#gn').onclick = () => go({p: 'tasks'});
   if ($('#seed')) $('#seed').onclick = seedDemo;
-  wireLate();
+  wireLate(); wireRedo();
   app.querySelectorAll('[data-up]').forEach(b => b.onclick = () => {
     const s = students.find(x => x.id === b.dataset.up);
     s.lv = LV[LV.indexOf(s.lv) + 1];
@@ -456,7 +507,7 @@ function profileDlg(id) {
   const p = prog(s), acc = roles.find(r => r.student_id === id);
   const myAssigns = assigns.filter(a => tgt(a).includes(s));
   const myRec = recitations.filter(r => r.student_id === id);
-  const late = lateRecitations(id).length;
+  const late = lateRecitations(id).length, redo = redoRequests(id).length;
   const subs = SECS.map(x => {
     const it = D.items.filter(i => i.sec === x.id);
     const c = it.filter(i => done[id].has(i.id)).length;
@@ -470,6 +521,7 @@ function profileDlg(id) {
       <div class="card stat"><b>${N(myRec.filter(r => r.status === 'approved').length)}</b><span>تلاوة مقبولة</span></div>
       <div class="card stat"><b>${N(myRec.filter(r => r.status === 'pending').length)}</b><span>بانتظار المراجعة</span></div>
       <div class="card stat"><b>${N(late)}</b><span>تأخير تلاوة</span></div>
+      <div class="card stat"><b>${N(redo)}</b><span>إعادة مطلوبة</span></div>
     </div>
     <h3 style="margin:12px 0 4px">تقدّم المواد</h3>
     <div class="card">${subs.map(x => `<div class="row" style="margin:6px 0"><div class="grow">${x.x.icon} ${E(x.x.t)} <span class="m">${N(x.c)}/${N(x.t)}</span></div><div style="width:40%"><div class="bar" title="${x.pct}%"><i style="width:${x.pct}%"></i></div></div><b>${N(x.pct)}%</b></div>`).join('')}</div>
@@ -695,14 +747,15 @@ function shome() {
   const myRec = recitations.filter(r => r.student_id === s.id);
   const pend = myRec.filter(r => r.status !== 'approved');
   const recOk = myRec.filter(r => r.status === 'approved').length;
-  const recWait = myRec.filter(r => r.status === 'pending').length, recRev = myRec.filter(r => r.status === 'review').length;
+  const recWait = myRec.filter(r => r.status === 'pending').length, recRev = redoRequests(s.id).length;
   const quizRecs = myRec.filter(r => r.status === 'approved' && (!r.quiz_at || !r.quiz_passed));
   const quizDone = myRec.filter(r => r.status === 'approved' && r.quiz_passed);
   app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
   ${notifyPanel(soon, 'student')}
   ${lateRecPanel(lateRecitations(s.id), 'student')}
+  ${redoPanel(redoRequests(s.id), 'student')}
   ${(quizRecs.length || quizDone.length) ? `<h2>اختبارات التلاوات</h2>` + quizRecs.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag w">📝 ${r.quiz_at ? `أعد ${N(r.quiz_correct)}/${N(r.quiz_total)}` : 'بانتظار الاختبار'}</span><div class="m">أُعتمدت التلاوة — أجب عن أسئلة قصيرة لتحديد إنجازك.</div></div><button class="btn" data-quiz="${r.id}">ابدأ الاختبار</button></div>`).join('') + (quizDone.length ? `<div class="card"><span class="tag ok">✅ أنهيت ${N(quizDone.length)} اختبار تلاوة</span></div>` : '') : ''}
-  ${pend.length ? `<h2>تلاوات تحتاج متابعة</h2>` + pend.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">أُرسلت ${new Date(r.created_at).toLocaleString('ar-EG')}</div></div><button class="btn alt" data-rd="${r.id}">🗑️ حذف</button></div>`).join('') : ''}
+  ${pend.length ? `<h2>تلاوات تحتاج متابعة</h2>` + pend.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">أُرسلت ${new Date(r.created_at).toLocaleString('ar-EG')}${r.teacher_note ? ' · ' + E(r.teacher_note) : ''}</div></div>${r.status === 'review' ? `<button class="btn" data-redo="${r.id}">🎙️ إعادة</button>` : ''}<button class="btn alt" data-rd="${r.id}">🗑️ حذف</button></div>`).join('') : ''}
   <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(dueInfo(a).label)}</div></div>${dueTag(a)}<button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +
     `<h2>موادي</h2><div class="grid">${SECS.map(x => {
       const it = D.items.filter(i => i.sec === x.id && LV.indexOf(i.lv) <= LV.indexOf(s.lv));
@@ -711,7 +764,7 @@ function shome() {
   app.querySelectorAll('[data-o]').forEach(b => b.onclick = () => go({p: 'lesson', id: b.dataset.o, back: view}));
   app.querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => quizDlg(+b.dataset.quiz));
   app.querySelectorAll('[data-rd]').forEach(b => b.onclick = () => deleteRecitation(+b.dataset.rd));
-  wireLate();
+  wireLate(); wireRedo();
   app.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => go({p: 'sec', sec: b.dataset.sec}));
   app.querySelector('[data-q]').onclick = () => go({p: 'quran'});
 }
@@ -958,15 +1011,17 @@ async function deleteRecitation(id) {
 function trec() {
   const list = recitations.slice();
   const pending = list.filter(r => r.status === 'pending').length;
-  app.innerHTML = `<h1>التلاوات</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(list.length)} تسجيل · ${N(pending)} بانتظار المراجعة</div><button class="btn alt" id="rf">تحديث</button></div>` +
+  const redo = redoRequests();
+  app.innerHTML = `<h1>التلاوات</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(list.length)} تسجيل · ${N(pending)} بانتظار المراجعة · ${N(redo.length)} إعادة مطلوبة</div><button class="btn alt" id="rf">تحديث</button></div>` +
     lateRecPanel(lateRecitations()) +
+    redoPanel(redo) +
     (list.length ? list.map(r => {
       const s = students.find(x => x.id === r.student_id);
       const ln = r.lesson_id ? (IT[r.lesson_id]?.t || r.lesson_id) : '';
       return `<div class="card"><div class="row"><div class="grow"><b>${E(s?.n || r.student_id)}</b> <span class="tag">${recWhere(r)}</span>${ln ? ` <span class="tag">📘 ${E(ln)} (قديم)</span>` : ''}${quizTag(r)} <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">${new Date(r.created_at).toLocaleString('ar-EG')}${r.teacher_note ? ' · ' + E(r.teacher_note) : ''}</div></div></div><audio controls data-rec="${r.id}" style="width:100%;margin:10px 0"></audio><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn" data-ap="${r.id}">اعتماد</button><button class="btn alt" data-rv="${r.id}">يحتاج إعادة</button></div></div>`;
     }).join('') : `<div class="card">لا توجد تلاوات بعد. يستطيع الطالب تسجيل تلاوته من صفحة القرآن.</div>`);
   $('#rf').onclick = () => loadData().then(render);
-  wireLate();
+  wireLate(); wireRedo();
   list.forEach(async r => {
     const {data, error} = await sb.storage.from('recitations').createSignedUrl(r.storage_path, 3600);
     const el = app.querySelector(`[data-rec="${r.id}"]`);
@@ -977,16 +1032,17 @@ function trec() {
     const note = status === 'approved'
       ? (prompt('ملاحظة للمعلّم (اختياري):', '') || '')
       : (prompt('سبب الإعادة (مثلاً: مخارج الحروف):', '') || '');
+    const reviewed_at = new Date().toISOString();
     const {error} = await sb.from('recitations')
-      .update({status, teacher_note: note, reviewed_at: new Date().toISOString()}).eq('id', id);
+      .update({status, teacher_note: note, reviewed_at}).eq('id', id);
     if (error) { toast('تعذّر حفظ المراجعة: ' + error.message); return; }
     const r = recitations.find(x => x.id === id);
-    if (r) Object.assign(r, {status, teacher_note: note});
+    if (r) Object.assign(r, {status, teacher_note: note, reviewed_at});
     const legacy = r?.lesson_id && status === 'approved';
     if (legacy) done[r.student_id]?.add(r.lesson_id);
     toast(status === 'approved'
       ? (legacy ? 'تم الاعتماد وأُضيف إنجاز الدرس 🏮' : 'تم الاعتماد — على الطالب إجراء الاختبار القصير 📝')
-      : 'تم تسجيل ملاحظة الإعادة');
+      : 'تم تسجيل ملاحظة الإعادة — سيظهر تنبيه للطالب 🔁');
     render();
   };
   app.querySelectorAll('[data-ap]').forEach(b => b.onclick = () => review(+b.dataset.ap, 'approved'));
@@ -1043,6 +1099,7 @@ function quran() {
     const base = D.q.slice(0, n - 1).reduce((a, x) => a + x.v.length, 0);
     keys = s.v.map((_, i) => ({g: base + i + 1, key: 'ay' + i}));
     app.innerHTML = `<h1>القرآن (رواية حفص)</h1>
+      ${!isTeacher() && sid ? redoPanel(redoRequests(sid), 'student') : ''}
       <div class="row qbar">
         <select id="sf" aria-label="السورة">${D.q.map(x => `<option value="${x.id}" ${x.id === n ? 'selected' : ''}>${N(x.id)}. ${x.name}</option>`).join('')}</select>
         <label>القارئ <select id="rc" aria-label="القارئ">${RECITERS.map(([id, name]) => `<option value="${id}" ${id === reciter ? 'selected' : ''}>${name}</option>`).join('')}</select></label>
@@ -1105,6 +1162,7 @@ function quran() {
     if ($('#rsur')) $('#rsur').onclick = () => reciteDlg(n, 1, s.name, 'surah');
     if ($('#qzs')) $('#qzs').onclick = () => quizDlg(surRec.id);
     if ($('#drs')) $('#drs').onclick = () => deleteRecitation(surRec.id);
+    wireRedo();
     sync();
   }
   draw();
