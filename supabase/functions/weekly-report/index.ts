@@ -6,8 +6,8 @@
 //   REPORT_APP_URL    (اختياري) رابط التطبيق، الافتراضي manara-atharok1.vercel.app
 //   REPORT_CRON_SECRET سرّ يمنع استدعاء الدالة من غير المجدول (أرسل في header: x-manara-cron)
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { Resend } from 'https://esm.sh/resend@4';
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import { Resend } from 'npm:resend@4';
 
 const LESSON_TITLES: Record<string, string> = {
   'a-elders':'احترام الكبير ورحمة الصغير','a-food':'آداب الطعام والشراب','a-istidhan':'الاستئذان',
