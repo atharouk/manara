@@ -332,8 +332,46 @@ create policy "recitations_student_delete" on storage.objects
   for delete to authenticated
   using (bucket_id = 'recitations' and public.can_delete_recitation(name));
 
--- ---------- اعتماد التلاوة يمنح إنجاز الدرس المرتبط تلقائياً ----------
+-- ---------- اعتماد التلاوة + اختبار قصير يمنح الإنجاز ----------
+-- lesson_id يُبقى للتوافق مع التسجيلات القديمة؛ المسار الجديد يستخدم quiz_lessons
 alter table public.recitations add column if not exists lesson_id text;
+alter table public.recitations add column if not exists quiz_lessons text[] not null default '{}'::text[];
+alter table public.recitations add column if not exists quiz_correct int;
+alter table public.recitations add column if not exists quiz_total int;
+alter table public.recitations add column if not exists quiz_passed boolean not null default false;
+alter table public.recitations add column if not exists quiz_at timestamptz;
+
+-- الطالب يجري الاختبار بعد اعتماد المعلّم؛ الدالة تتحقق من الملكية والاعتماد
+create or replace function public.submit_recitation_quiz(
+  p_recitation_id bigint, p_lessons text[], p_correct int, p_total int
+) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare
+  v_student text;
+begin
+  select student_id into v_student
+    from public.recitations where id = p_recitation_id for update;
+  if v_student is null then raise exception 'التلاوة غير موجودة'; end if;
+  if v_student <> public.my_student_id() then raise exception 'غير مسموح بتقييم هذه التلاوة'; end if;
+  if not exists (select 1 from public.recitations where id = p_recitation_id and status = 'approved') then
+    raise exception 'التلاوة لم تُعتمد بعد';
+  end if;
+  if p_total is null or p_total < 1 or p_correct is null or p_correct < 0 or p_correct > p_total then
+    raise exception 'نتيجة الاختبار غير صالحة';
+  end if;
+  update public.recitations
+     set quiz_lessons = coalesce(p_lessons, '{}'::text[]),
+         quiz_correct = p_correct,
+         quiz_total = p_total,
+         quiz_passed = p_correct > 0,
+         quiz_at = now()
+   where id = p_recitation_id;
+  return p_correct > 0;
+end;
+$$;
+
+revoke all on function public.submit_recitation_quiz(bigint, text[], int, int) from public, anon;
+grant execute on function public.submit_recitation_quiz(bigint, text[], int, int) to authenticated;
 
 create or replace function public.recitation_approved_completion()
 returns trigger
@@ -342,15 +380,17 @@ security definer
 set search_path = public
 as $$
 begin
-  -- إذا كانت مقبولة سابقاً فالإنجاز مُمنوح بالفعل
-  if tg_op = 'UPDATE' then
-    if old.status = 'approved' then
-      return new;
-    end if;
-  end if;
-  if new.status = 'approved' and new.lesson_id is not null then
+  if new.status <> 'approved' then return new; end if;
+  -- تسجيلات قديمة كانت تختار الدرس يدوياً
+  if new.lesson_id is not null then
     insert into public.completions (student_id, lesson_id)
     values (new.student_id, new.lesson_id)
+    on conflict (student_id, lesson_id) do nothing;
+  end if;
+  -- المسار الجديد: الدروس التي أجاب عنها الطالب إجابة صحيحة في الاختبار القصير
+  if new.quiz_passed and coalesce(array_length(new.quiz_lessons, 1), 0) > 0 then
+    insert into public.completions (student_id, lesson_id)
+    select new.student_id, lesson from unnest(new.quiz_lessons) as lesson
     on conflict (student_id, lesson_id) do nothing;
   end if;
   return new;
@@ -359,7 +399,7 @@ $$;
 
 drop trigger if exists recitations_approved_completion on public.recitations;
 create trigger recitations_approved_completion
-  after insert or update of status on public.recitations
+  after insert or update of status, quiz_passed, quiz_lessons on public.recitations
   for each row execute function public.recitation_approved_completion();
 
 -- ---------- تسجيل السورة كاملة إلى جانب تسجيل الآية ----------

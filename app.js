@@ -549,8 +549,11 @@ function shome() {
   const pend = myRec.filter(r => r.status !== 'approved');
   const recOk = myRec.filter(r => r.status === 'approved').length;
   const recWait = myRec.filter(r => r.status === 'pending').length, recRev = myRec.filter(r => r.status === 'review').length;
+  const quizRecs = myRec.filter(r => r.status === 'approved' && (!r.quiz_at || !r.quiz_passed));
+  const quizDone = myRec.filter(r => r.status === 'approved' && r.quiz_passed);
   app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
   ${notifyPanel(soon, 'student')}
+  ${(quizRecs.length || quizDone.length) ? `<h2>اختبارات التلاوات</h2>` + quizRecs.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag w">📝 ${r.quiz_at ? `أعد ${N(r.quiz_correct)}/${N(r.quiz_total)}` : 'بانتظار الاختبار'}</span><div class="m">أُعتمدت التلاوة — أجب عن أسئلة قصيرة لتحديد إنجازك.</div></div><button class="btn" data-quiz="${r.id}">ابدأ الاختبار</button></div>`).join('') + (quizDone.length ? `<div class="card"><span class="tag ok">✅ أنهيت ${N(quizDone.length)} اختبار تلاوة</span></div>` : '') : ''}
   ${pend.length ? `<h2>تلاوات تحتاج متابعة</h2>` + pend.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">أُرسلت ${new Date(r.created_at).toLocaleString('ar-EG')}</div></div><button class="btn alt" data-rd="${r.id}">🗑️ حذف</button></div>`).join('') : ''}
   <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(dueInfo(a).label)}</div></div>${dueTag(a)}<button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +
     `<h2>موادي</h2><div class="grid">${SECS.map(x => {
@@ -558,6 +561,7 @@ function shome() {
       return `<button class="sub" data-sec="${x.id}"><span class="em">${x.icon}</span><b>${x.t}</b><div class="m">${N(it.filter(i => done[s.id].has(i.id)).length)} / ${N(it.length)}</div></button>`;
     }).join('')}<button class="sub" data-q="1"><span class="em">📖</span><b>القرآن</b><div class="m">رواية حفص</div></button></div>`;
   app.querySelectorAll('[data-o]').forEach(b => b.onclick = () => go({p: 'lesson', id: b.dataset.o, back: view}));
+  app.querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => quizDlg(+b.dataset.quiz));
   app.querySelectorAll('[data-rd]').forEach(b => b.onclick = () => deleteRecitation(+b.dataset.rd));
   app.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => go({p: 'sec', sec: b.dataset.sec}));
   app.querySelector('[data-q]').onclick = () => go({p: 'quran'});
@@ -651,19 +655,21 @@ const RECITERS = [
 ];
 const RECT = {pending: 'قيد المراجعة', approved: 'مقبولة', review: 'تحتاج إعادة'};
 const recWhere = r => `${N(r.surah)}. ${E(D.q[r.surah - 1]?.name || r.surah)} — ${r.scope === 'surah' ? 'السورة كاملة' : 'الآية ' + N(r.ayah)}`;
+function recLessons(r) {
+  if (!r) return [];
+  if (r.scope === 'surah') {
+    const len = D.q[r.surah - 1]?.v.length || 1;
+    return [...new Set(Array.from({length: len}, (_, i) => lessonsFor(r.surah, i + 1)).flat())];
+  }
+  return lessonsFor(r.surah, r.ayah);
+}
 
 /* ---------- تسجيل تلاوة الطالب (آية أو سورة كاملة) ---------- */
 function reciteDlg(surah, ayah, surahName, scope = 'ayah') {
   const d = $('#dlg'), full = scope === 'surah';
-  const len = D.q[surah - 1]?.v.length || 1;
-  const cand = full
-    ? [...new Set(Array.from({length: len}, (_, i) => lessonsFor(surah, i + 1)).flat())]
-    : lessonsFor(surah, ayah);
-  const def = cand.find(id => !done[sid]?.has(id)) || '';
-  const options = `<option value="">بدون ربط بدرس</option>` + cand.map(id =>
-    `<option value="${id}" ${id === def ? 'selected' : ''}>${E(IT[id].t)}${done[sid]?.has(id) ? ' (منجز)' : ''}</option>`).join('');
+  const cand = recLessons({surah, ayah, scope});
   d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">${full ? 'تسجيل السورة كاملة' : 'تسجيل تلاوة'}</h2><p class="m">${E(surahName)} — ${full ? 'السورة كاملة' : 'الآية ' + N(ayah)}</p>` +
-    `<p class="m" style="margin:6px 0">الدرس المرتبط (يُضاف لسجل الإنجاز بعد اعتماد المعلّم):</p><select id="rlesson" style="width:100%;max-width:420px;margin-bottom:10px">${options}</select>` +
+    `<p class="m" style="margin:6px 0">بعد اعتماد المعلّم ستجري اختباراً قصيراً (${N(cand.length)} سؤال) لتحديد الدرس أو الدروس التي تُضاف لإنجازك.</p>` +
     `<div class="card" id="rstat">اضغط «ابدأ التسجيل» ثم ${full ? 'تلا السورة من أولها إلى آخرها' : 'تلا الآية'} بصوت واضح.</div><div class="row" style="margin-top:14px;flex-wrap:wrap"><button class="btn" id="rgo">ابدأ التسجيل</button><button class="btn alt" id="rsend" disabled>إرسال للمعلّم</button><button class="btn alt" id="rx">إغلاق</button></div>`;
   d.showModal();
   const stat = $('#rstat'), goBtn = $('#rgo'), sendBtn = $('#rsend');
@@ -705,7 +711,7 @@ function reciteDlg(surah, ayah, surahName, scope = 'ayah') {
     if (ue) { toast('تعذّر رفع التلاوة: ' + ue.message); sendBtn.disabled = false; return; }
     const {data, error: ie} = await sb.from('recitations')
       .insert({student_id: sid, surah, ayah: full ? 1 : ayah, scope,
-               storage_path: path, status: 'pending', lesson_id: $('#rlesson').value || null})
+               storage_path: path, status: 'pending'})
       .select().single();
     if (ie) {
       await sb.storage.from('recitations').remove([path]);
@@ -714,6 +720,74 @@ function reciteDlg(surah, ayah, surahName, scope = 'ayah') {
     recitations.unshift(data);
     d.close(); toast('أُرسلت التلاوة بانتظار مراجعة المعلّم');
   };
+}
+
+/* ---------- اختبار قصير يحدد دروس التلاوة المقبولة ---------- */
+function quizQuestions(r) {
+  return recLessons(r).map(id => {
+    const it = IT[id], q = it?.quiz?.[0];
+    if (!q || !q.o?.length) return null;
+    return {id, title: it.t, q: q.q, why: q.why || '', correct: q.a,
+            opts: sh(q.o.map((text, i) => ({text, i})))};
+  }).filter(Boolean);
+}
+function quizTag(r) {
+  if (r.quiz_passed) return `<span class="tag ok">📝 نجح ${N(r.quiz_correct)}/${N(r.quiz_total)}</span>`;
+  if (r.quiz_at) return `<span class="tag late">📝 أعد ${N(r.quiz_correct)}/${N(r.quiz_total)}</span>`;
+  if (r.status === 'approved') return `<span class="tag w">📝 بانتظار الاختبار</span>`;
+  return '';
+}
+function quizDlg(id) {
+  const r = recitations.find(x => x.id === id);
+  if (!r || r.status !== 'approved') return;
+  const qs = quizQuestions(r);
+  if (!qs.length) { toast('لا يوجد اختبار مرتبط بهذه التلاوة'); return; }
+  const d = $('#dlg');
+  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">اختبار قصير: ${recWhere(r)}</h2>` +
+    `<p class="m" style="margin:4px 0 10px">لكل إجابة صحيحة يُضاف درسها إلى إنجازك. يمكنك إعادة الاختبار إذا لم تُصب أي إجابة.</p>` +
+    qs.map((q, i) => `<div class="card" data-quizq="${i}"><b>${N(i + 1)}. ${E(q.q)}</b><div class="m">من درس: ${E(q.title)}</div>` +
+      q.opts.map(o => `<label class="opt" style="display:flex;gap:8px;align-items:center"><input type="radio" name="q${i}" value="${o.i}"><span>${E(o.text)}</span></label>`).join('') +
+      `<div class="fb" data-fb="${i}" hidden></div></div>`).join('') +
+    `<div class="row" style="margin-top:12px"><button class="btn" id="qok">إرسال الإجابات</button><button class="btn alt" id="qx">إغلاق</button></div>`;
+  d.showModal();
+  $('#qx').onclick = () => d.close();
+  const submit = $('#qok');
+  const check = async () => {
+    const answers = qs.map((q, i) => {
+      const sel = d.querySelector(`input[name="q${i}"]:checked`);
+      const val = sel ? +sel.value : -1;
+      return {q, ok: val === q.correct};
+    });
+    answers.forEach((a, i) => {
+      const fb = d.querySelector(`[data-fb="${i}"]`);
+      fb.hidden = false;
+      fb.className = 'fb ' + (a.ok ? 'ok' : 'no');
+      fb.textContent = a.ok
+        ? `✅ إجابة صحيحة — أُضيف درس «${a.q.title}».`
+        : `❌ الإجابة الصحيحة: ${a.q.opts.find(o => o.i === a.q.correct)?.text || ''}${a.q.why ? ' — ' + a.q.why : ''}`;
+    });
+    const lessons = answers.filter(a => a.ok).map(a => a.q.id);
+    submit.disabled = true;
+    const {error} = await sb.rpc('submit_recitation_quiz', {
+      p_recitation_id: r.id, p_lessons: lessons,
+      p_correct: lessons.length, p_total: qs.length
+    });
+    if (error) { toast('تعذّر حفظ الاختبار: ' + error.message); submit.disabled = false; return; }
+    Object.assign(r, {quiz_lessons: lessons, quiz_correct: lessons.length,
+      quiz_total: qs.length, quiz_passed: lessons.length > 0, quiz_at: new Date().toISOString()});
+    lessons.forEach(l => done[r.student_id]?.add(l));
+    toast(lessons.length ? `أُضيف ${N(lessons.length)} درس لإنجازك 🏮` : 'لم تُصب أي إجابة. يمكنك إعادة الاختبار.');
+    if (lessons.length) {
+      submit.disabled = false;
+      submit.textContent = 'إغلاق';
+      submit.onclick = () => { d.close(); render(); };
+    } else {
+      submit.textContent = 'إعادة المحاولة';
+      submit.disabled = false;
+      submit.onclick = check;
+    }
+  };
+  submit.onclick = check;
 }
 
 /* ---------- حذف التلاوة قبل المراجعة (الطالب فقط) ---------- */
@@ -739,7 +813,7 @@ function trec() {
     (list.length ? list.map(r => {
       const s = students.find(x => x.id === r.student_id);
       const ln = r.lesson_id ? (IT[r.lesson_id]?.t || r.lesson_id) : '';
-      return `<div class="card"><div class="row"><div class="grow"><b>${E(s?.n || r.student_id)}</b> <span class="tag">${recWhere(r)}</span>${ln ? ` <span class="tag">📘 ${E(ln)}</span>` : ''} <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">${new Date(r.created_at).toLocaleString('ar-EG')}${r.teacher_note ? ' · ' + E(r.teacher_note) : ''}</div></div></div><audio controls data-rec="${r.id}" style="width:100%;margin:10px 0"></audio><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn" data-ap="${r.id}">اعتماد</button><button class="btn alt" data-rv="${r.id}">يحتاج إعادة</button></div></div>`;
+      return `<div class="card"><div class="row"><div class="grow"><b>${E(s?.n || r.student_id)}</b> <span class="tag">${recWhere(r)}</span>${ln ? ` <span class="tag">📘 ${E(ln)} (قديم)</span>` : ''}${quizTag(r)} <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">${new Date(r.created_at).toLocaleString('ar-EG')}${r.teacher_note ? ' · ' + E(r.teacher_note) : ''}</div></div></div><audio controls data-rec="${r.id}" style="width:100%;margin:10px 0"></audio><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn" data-ap="${r.id}">اعتماد</button><button class="btn alt" data-rv="${r.id}">يحتاج إعادة</button></div></div>`;
     }).join('') : `<div class="card">لا توجد تلاوات بعد. يستطيع الطالب تسجيل تلاوته من صفحة القرآن.</div>`);
   $('#rf').onclick = () => loadData().then(render);
   list.forEach(async r => {
@@ -757,10 +831,11 @@ function trec() {
     if (error) { toast('تعذّر حفظ المراجعة: ' + error.message); return; }
     const r = recitations.find(x => x.id === id);
     if (r) Object.assign(r, {status, teacher_note: note});
-    const linked = r?.lesson_id && status === 'approved';
-    if (linked) done[r.student_id]?.add(r.lesson_id);
-    toast(linked ? 'تم الاعتماد وأُضيف إنجاز الدرس 🏮'
-      : status === 'approved' ? 'تم اعتماد التلاوة' : 'تم تسجيل ملاحظة الإعادة');
+    const legacy = r?.lesson_id && status === 'approved';
+    if (legacy) done[r.student_id]?.add(r.lesson_id);
+    toast(status === 'approved'
+      ? (legacy ? 'تم الاعتماد وأُضيف إنجاز الدرس 🏮' : 'تم الاعتماد — على الطالب إجراء الاختبار القصير 📝')
+      : 'تم تسجيل ملاحظة الإعادة');
     render();
   };
   app.querySelectorAll('[data-ap]').forEach(b => b.onclick = () => review(+b.dataset.ap, 'approved'));
@@ -823,11 +898,11 @@ function quran() {
         <label>السرعة <select id="rt" aria-label="سرعة التلاوة">${[0.75, 1, 1.25, 1.5].map(v => `<option value="${v}" ${v === rate ? 'selected' : ''}>${v}×</option>`).join('')}</select></label>
         <label><input type="checkbox" id="au" ${auto ? 'checked' : ''}> تتابع تلقائي</label>
         <button class="btn alt" id="plall">▶ تلاوة السورة</button><button class="btn alt" id="stp">■ إيقاف</button>
-        ${!isTeacher() && sid ? `<button class="btn" id="rsur">🎙️ تسجيل السورة كاملة</button>${surRec ? `<span class="tag">${RECT[surRec.status] || surRec.status}</span>${surRec.status !== 'approved' ? `<button class="btn alt mini" id="drs" title="حذف تسجيل السورة">🗑️</button>` : ''}` : ''}` : ''}
+        ${!isTeacher() && sid ? `<button class="btn" id="rsur">🎙️ تسجيل السورة كاملة</button>${surRec ? `<span class="tag">${RECT[surRec.status] || surRec.status}</span>${surRec.status === 'approved' && !surRec.quiz_passed ? `<button class="btn mini" id="qzs" title="اختبار قصير لتحديد الدرس">📝 اختبار</button>` : ''}${surRec.status !== 'approved' ? `<button class="btn alt mini" id="drs" title="حذف تسجيل السورة">🗑️</button>` : ''}` : ''}` : ''}
         <label style="margin-inline-start:auto"><input type="checkbox" id="hd" ${hide ? 'checked' : ''}> وضع الحفظ: إخفاء الآيات (اضغط على الآية لإظهارها)</label>
       </div>
       <div class="card ar qtxt" id="qt" style="margin-top:12px"></div>
-      <p class="note">نص القرآن: مشروع Tanzil (tanzil.net)، رواية حفص، دون أي تعديل. التلاوة من خدمة التلاوة القرآنية (cdn.islamic.network) بالقارئ المختار، وتحتاج اتصالاً بالإنترنت. للطالب: زر 🎙️ بجانب كل آية، أو «🎙️ تسجيل السورة كاملة» أعلى الصفحة، يرسل التسجيل إلى المعلّم للمراجعة، ويمكن ربطه بدرس يُضاف تلقائياً لسجل الإنجاز عند الاعتماد. لم تُراجَع النصوص بعد من مختص.</p>`;
+      <p class="note">نص القرآن: مشروع Tanzil (tanzil.net)، رواية حفص، دون أي تعديل. التلاوة من خدمة التلاوة القرآنية (cdn.islamic.network) بالقارئ المختار، وتحتاج اتصالاً بالإنترنت. للطالب: زر 🎙️ بجانب كل آية، أو «🎙️ تسجيل السورة كاملة» أعلى الصفحة، يرسل التسجيل إلى المعلّم للمراجعة؛ وبعد الاعتماد يُجري اختباراً قصيراً يُحدد الدرس الذي يُضاف لسجل الإنجاز. لم تُراجَع النصوص بعد من مختص.</p>`;
     const qt = $('#qt');
     if (n !== 1 && n !== 9) {
       const wrap = document.createElement('div'); wrap.className = 'row basm-row';
@@ -852,6 +927,12 @@ function quran() {
       if (mine) {
         const tag = document.createElement('span'); tag.className = 'tag'; tag.style.alignSelf = 'center'; tag.textContent = RECT[mine.status] || mine.status;
         row.appendChild(tag);
+        if (!isTeacher() && sid && mine.status === 'approved' && !mine.quiz_passed) {
+          const qb = document.createElement('button'); qb.className = 'btn mini'; qb.textContent = '📝 اختبار';
+          qb.title = 'اختبار قصير لتحديد الدرس'; qb.setAttribute('aria-label', 'اختبار تلاوة الآية ' + N(i + 1));
+          qb.onclick = () => quizDlg(mine.id);
+          row.appendChild(qb);
+        }
         if (!isTeacher() && sid && mine.status !== 'approved') {
           const db = document.createElement('button'); db.className = 'btn alt mini'; db.textContent = '🗑️';
           db.title = 'حذف التلاوة قبل المراجعة'; db.setAttribute('aria-label', 'حذف تلاوة الآية ' + N(i + 1));
@@ -871,6 +952,7 @@ function quran() {
     $('#plall').onclick = () => { if (keys[0]) play(keys[0].g, keys[0].key); };
     $('#stp').onclick = stop;
     if ($('#rsur')) $('#rsur').onclick = () => reciteDlg(n, 1, s.name, 'surah');
+    if ($('#qzs')) $('#qzs').onclick = () => quizDlg(surRec.id);
     if ($('#drs')) $('#drs').onclick = () => deleteRecitation(surRec.id);
     sync();
   }
