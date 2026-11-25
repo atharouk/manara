@@ -309,3 +309,33 @@ create policy "recitations_student_insert" on storage.objects
 create policy "recitations_student_delete" on storage.objects
   for delete to authenticated
   using (bucket_id = 'recitations' and split_part(name, '/', 1) = public.my_student_id());
+
+-- ---------- اعتماد التلاوة يمنح إنجاز الدرس المرتبط تلقائياً ----------
+alter table public.recitations add column if not exists lesson_id text;
+
+create or replace function public.recitation_approved_completion()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- إذا كانت مقبولة سابقاً فالإنجاز مُمنوح بالفعل
+  if tg_op = 'UPDATE' then
+    if old.status = 'approved' then
+      return new;
+    end if;
+  end if;
+  if new.status = 'approved' and new.lesson_id is not null then
+    insert into public.completions (student_id, lesson_id)
+    values (new.student_id, new.lesson_id)
+    on conflict (student_id, lesson_id) do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists recitations_approved_completion on public.recitations;
+create trigger recitations_approved_completion
+  after insert or update of status on public.recitations
+  for each row execute function public.recitation_approved_completion();
