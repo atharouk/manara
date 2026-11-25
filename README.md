@@ -141,7 +141,8 @@ git push origin main
 تُرسل رسالة كل **جمعة ٦ مساءً بتوقيت الرياض** (15:00 UTC): ملخّص شامل للمعلّم، ورسالة مخصّصة لكل طالب ببياناته.
 
 ### الإعداد لمرة واحدة
-1. أنشئ حساباً في [Resend](https://resend.com) وأضف دوميناً مُتحقَّقاً منه للإرسال.
+1. أنشئ حساباً في [Resend](https://resend.com) وأضف دوميناً مُتحقَّقاً منه للإرسال من https://resend.com/domains.  
+   ⚠️ إذا استخدمت `onboarding@resend.dev` دون دومين مُتحقَّق، فستقبل Resend الإرسال **إلى بريد حساب Resend فقط**، وسترفض إرسال تقارير الطلاب إلى عناوين أخرى.
 2. في Supabase → **Edge Functions → Secrets** أضف:
    - `RESEND_API_KEY` = مفتاح Resend.
    - `REPORT_FROM_EMAIL` = بريد المرسل المُتحقَّق منه (مثل `منارة@yourdomain.com`).
