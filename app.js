@@ -144,7 +144,8 @@ $('#sin').onclick = async () => {
   $('#amsg').textContent = '';
   await startApp(data.user);
 };
-$('#sup').onclick = async () => {
+const supBtn = $('#sup');
+if (supBtn) supBtn.onclick = async () => {
   const email = $('#em').value.trim(), password = $('#pw').value;
   const {data, error} = await sb.auth.signUp({email, password});
   if (error) { $('#amsg').textContent = error.message; return; }
