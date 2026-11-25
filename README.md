@@ -4,7 +4,7 @@
 
 > **الرابط المباشر:** https://manara-atharok1.vercel.app
 >
-> **المستودع:** https://github.com/atharouk/manara
+> **المستودع:** https://github.com/atharouk/manara-app
 >
 > **حساب المعلّم التجريبي:** `manara.teacher@example.com` — كلمة المرور: `Manara@2026`
 >
