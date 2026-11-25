@@ -144,7 +144,7 @@ function lateRecPanel(list, mode = 'plain') {
   const rows = list.map(x => {
     const status = x.state === 'missing'
       ? '<span class="tag late">لم تُسلّم</span>'
-      : `<span class="tag late">سُلّمت متأخرة ${N(x.days)} ${x.days === 1 ? 'يوم' : 'أيام'}</span>`;
+      : `<span class="tag late">سُلّمت متأخرة ${N(x.days)} يوم</span>`;
     const detail = `${mode === 'student' ? '' : E(x.s.n) + ' · '}${E(dueInfo(x.a).label)}`;
     const action = mode === 'student'
       ? `<button class="btn alt mini" data-lateo="${x.a.id}">سجّل التلاوة</button>`
