@@ -15,7 +15,7 @@ const E = s => String(s).replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>'
 const sh = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
 const auth = $('#auth');
-let students = [], done = {}, assigns = [], roles = [];
+let students = [], done = {}, assigns = [], roles = [], recitations = [];
 let mode = 'T', sid = null, view = {p: 'home'}, user = null, role = 'teacher';
 const isTeacher = () => role === 'teacher';
 
@@ -29,18 +29,20 @@ function toast(t) {
 
 /* ---------- Supabase layer ---------- */
 async function loadData() {
-  const [{data: st, error: e1}, {data: cp, error: e2}, {data: as, error: e3}, {data: ro, error: e4}] = await Promise.all([
+  const [{data: st, error: e1}, {data: cp, error: e2}, {data: as, error: e3}, {data: ro, error: e4}, {data: rc, error: e5}] = await Promise.all([
     sb.from('students').select('*').order('id'),
     sb.from('completions').select('*'),
     sb.from('assignments').select('*').order('created_at'),
-    sb.from('user_roles').select('user_id, role, student_id, email')
+    sb.from('user_roles').select('user_id, role, student_id, email'),
+    sb.from('recitations').select('*').order('created_at', {ascending: false})
   ]);
-  if (e1 || e2 || e3 || e4) {
-    console.error(e1 || e2 || e3 || e4);
+  if (e1 || e2 || e3 || e4 || e5) {
+    console.error(e1 || e2 || e3 || e4 || e5);
     toast('تعذّر تحميل البيانات من Supabase');
   }
   students = (st || []).map(r => ({id: r.id, n: r.name, lv: r.level}));
   roles = ro || [];
+  recitations = rc || [];
   done = Object.fromEntries(students.map(s => [s.id, new Set()]));
   (cp || []).forEach(r => { if (done[r.student_id]) done[r.student_id].add(r.lesson_id); });
   assigns = (as || []).map(r => ({dbId: r.id, id: r.lesson_id, to: r.target, due: r.due || 'بلا موعد'}));
@@ -170,7 +172,7 @@ if (supBtn) supBtn.onclick = async () => {
 };
 $('#out').onclick = async () => {
   await sb.auth.signOut();
-  students = []; done = {}; assigns = []; roles = [];
+  students = []; done = {}; assigns = []; roles = []; recitations = [];
   mode = 'T'; sid = null; view = {p: 'home'}; user = null; role = 'teacher';
   showAuth();
   $('#amsg').textContent = '';
@@ -187,7 +189,7 @@ function prog(s) {
 function go(v) { view = v; render(); window.scrollTo(0, 0); }
 function render() {
   // الطالب لا يصل إلى صفحات المعلّم حتى لو تغيّرت حالة الواجهة
-  if (!isTeacher() && ['students', 'cur', 'tasks', 'reports'].includes(view.p)) view = {p: 'home'};
+  if (!isTeacher() && ['students', 'cur', 'tasks', 'reports', 'recitations'].includes(view.p)) view = {p: 'home'};
   const toggle = isTeacher() ? '' : 'none';
   $('#bT').style.display = toggle;
   $('#bS').style.display = toggle;
@@ -196,11 +198,11 @@ function render() {
   $('#st').style.display = isTeacher() && mode === 'S' ? '' : 'none';
   $('#st').innerHTML = students.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${E(s.n)}</option>`).join('');
   side();
-  ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, quran, sec: ssec, lesson})[view.p]();
+  ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, recitations: trec, quran, sec: ssec, lesson})[view.p]();
 }
 function side() {
   const it = mode === 'T'
-    ? [['home', 'الرئيسية'], ['students', 'الطلاب'], ['cur', 'المنهج'], ['tasks', 'المهام'], ['reports', 'التقارير'], ['quran', 'القرآن']]
+    ? [['home', 'الرئيسية'], ['students', 'الطلاب'], ['cur', 'المنهج'], ['tasks', 'المهام'], ['reports', 'التقارير'], ['recitations', 'التلاوات'], ['quran', 'القرآن']]
     : [['home', 'الرئيسية'], ['quran', 'القرآن'], ...SECS.map(s => ['sec:' + s.id, s.icon + ' ' + s.t])];
   const cur = view.p === 'sec' ? 'sec:' + view.sec : view.p;
   $('#side').innerHTML = `<div class="nv">` + it.map(([k, t]) => `<button data-k="${k}" class="${cur === k ? 'on' : ''}">${t}</button>`).join('') + `</div>`;
@@ -216,13 +218,16 @@ $('#st').onchange = e => { sid = e.target.value; go({p: 'home'}); };
 /* ---------- Teacher views ---------- */
 function thome() {
   const rd = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم');
+  const pending = recitations.filter(r => r.status === 'pending').length;
   const tot = assigns.reduce((a, x) => a + tgt(x).length, 0),
         dn = assigns.reduce((a, x) => a + tgt(x).filter(s => done[s.id].has(x.id)).length, 0);
-  app.innerHTML = `<h1>أهلاً بك يا معلم</h1><div class="stats"><div class="card stat"><b>${N(students.length)}</b><span>طالب</span></div><div class="card stat"><b>${N(assigns.length)}</b><span>مهمة مُسندة</span></div><div class="card stat"><b>${N(dn)} / ${N(tot)}</b><span>تسليمات أُنجزت</span></div><div class="card stat"><b>${N(rd.length)}</b><span>جاهزون للترقية</span></div></div>` +
+  app.innerHTML = `<h1>أهلاً بك يا معلم</h1><div class="stats"><div class="card stat"><b>${N(students.length)}</b><span>طالب</span></div><div class="card stat"><b>${N(assigns.length)}</b><span>مهمة مُسندة</span></div><div class="card stat"><b>${N(dn)} / ${N(tot)}</b><span>تسليمات أُنجزت</span></div><div class="card stat"><b>${N(rd.length)}</b><span>جاهزون للترقية</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div></div>` +
+    (pending ? `<div class="card" style="border:2px solid var(--lamp)"><b>${N(pending)} تلاوة بانتظار المراجعة</b><p class="m" style="margin:4px 0 8px">استمع إليها واعتمدها أو اطلب إعادة التسجيل.</p><button class="btn lamp" id="gr">فتح التلاوات</button></div>` : '') +
     (rd.length ? `<div class="card" style="border:2px solid var(--lamp)"><b>أنهوا معظم مستواهم</b>${rd.map(s => `<div class="row" style="margin-top:6px"><span class="grow">${E(s.n)} (${prog(s).pct}%)</span><button class="btn lamp" data-up="${s.id}">ترقية إلى ${LV[LV.indexOf(s.lv) + 1]}</button></div>`).join('')}</div>` : '') +
     (students.length ? `<div class="card"><p style="margin:0 0 10px">من «المنهج» تعاين الدروس وتسندها، ومن «الطلاب» ترى تقدم كل طالب.</p><button class="btn" id="g1">فتح المنهج</button></div>`
       : `<div class="card"><p style="margin:0 0 10px">لا يوجد طلاب بعد. يمكنك البدء بالبيانات التجريبية.</p><button class="btn" id="seed">تحميل بيانات تجريبية</button></div>`);
   if ($('#g1')) $('#g1').onclick = () => go({p: 'cur'});
+  if ($('#gr')) $('#gr').onclick = () => go({p: 'recitations'});
   if ($('#seed')) $('#seed').onclick = seedDemo;
   app.querySelectorAll('[data-up]').forEach(b => b.onclick = () => {
     const s = students.find(x => x.id === b.dataset.up);
@@ -351,7 +356,8 @@ function reportData() {
       cnt: students.reduce((a, s) => a + it.filter(i => done[s.id].has(i.id)).length, 0)};
   });
   const rows = students.map(s => {
-    const r = {name: s.n, level: s.lv, pct: prog(s).pct, done: done[s.id].size};
+    const r = {name: s.n, level: s.lv, pct: prog(s).pct, done: done[s.id].size,
+      rec: recitations.filter(x => x.student_id === s.id && x.status === 'approved').length};
     subs.forEach(({x, it}) => {
       const c = it.filter(i => done[s.id].has(i.id)).length;
       r[x.id] = it.length ? Math.round(c / it.length * 100) : 0;
@@ -362,18 +368,21 @@ function reportData() {
   const allDone = students.reduce((a, s) => a + done[s.id].size, 0);
   const allPct = students.length ? Math.round(students.reduce((a, s) => a + prog(s).pct, 0) / students.length) : 0;
   const ready = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم').length;
-  return {subs, rows, allDone, allPct, ready};
+  const approved = recitations.filter(r => r.status === 'approved').length;
+  const pending = recitations.filter(r => r.status === 'pending').length;
+  return {subs, rows, allDone, allPct, ready, approved, pending};
 }
 const csvCell = v => `"${String(v).replace(/"/g, '""')}"`;
 function exportCSV() {
-  const {subs, rows, allPct, allDone, ready} = reportData();
-  const head = ['الطالب', 'المستوى', 'الإنجاز العام %', 'الدروس المنجزة',
+  const {subs, rows, allPct, allDone, ready, approved, pending} = reportData();
+  const head = ['الطالب', 'المستوى', 'الإنجاز العام %', 'الدروس المنجزة', 'تلاوات مقبولة',
     ...subs.flatMap(({x}) => [`${x.t} %`, `${x.t} (منجز/إجمالي)`])];
   const lines = [
     ['تقرير منارة', new Date().toLocaleString('ar-EG')],
     ['الإنجاز العام %', allPct], ['الدروس المنجزة', allDone], ['جاهزون للترقية', ready],
+    ['تلاوات مقبولة', approved], ['تلاوات بانتظار المراجعة', pending],
     [], head,
-    ...rows.map(r => [r.name, r.level, r.pct, r.done,
+    ...rows.map(r => [r.name, r.level, r.pct, r.done, r.rec,
       ...subs.flatMap(({x}) => [r[x.id], r[x.id + '_cnt']])
     ])
   ];
@@ -392,11 +401,11 @@ function printPDF() {
   window.print();
 }
 function treports() {
-  const {subs, rows, allDone, allPct, ready} = reportData();
+  const {subs, rows, allDone, allPct, ready, approved, pending} = reportData();
   app.innerHTML = `<div class="print-head"><h1>منارة — تقرير المتابعة</h1><p>تاريخ التقرير: ${new Date().toLocaleString('ar-EG')}</p></div>
     <h1>التقارير</h1>
     <div class="row" style="margin-bottom:10px"><div class="grow m">جاهز للتصدير والمشاركة</div><button class="btn alt" id="excsv">تصدير CSV</button><button class="btn" id="expdf">حفظ PDF</button></div>
-    <div class="stats"><div class="card stat"><b>${N(allPct)}%</b><span>إنجاز عام</span></div><div class="card stat"><b>${N(allDone)}</b><span>درس منجز</span></div><div class="card stat"><b>${N(ready)}</b><span>جاهز للترقية</span></div></div>
+    <div class="stats"><div class="card stat"><b>${N(allPct)}%</b><span>إنجاز عام</span></div><div class="card stat"><b>${N(allDone)}</b><span>درس منجز</span></div><div class="card stat"><b>${N(ready)}</b><span>جاهز للترقية</span></div><div class="card stat"><b>${N(approved)}</b><span>تلاوات مقبولة</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div></div>
     <h2>إنجاز المواد</h2><div class="card">${subs.map(s => `<div class="row" style="margin:8px 0"><div class="grow"><b>${s.icon} ${s.t}</b><div class="m">${N(s.cnt)} / ${N(s.total)} درس</div></div><div style="width:55%"><div class="bar" title="${s.pct}%"><i style="width:${s.pct}%"></i></div></div><b>${N(s.pct)}%</b></div>`).join('')}</div>
     <h2>تقدّم الطلاب</h2><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>عام</th>${SECS.map(x => `<th>${x.icon}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr><td><b>${E(r.name)}</b></td><td>${E(r.level)}</td><td><div class="bar" title="${r.pct}%"><i style="width:${r.pct}%"></i></div></td>${SECS.map(x => `<td><div class="bar" title="${r[x.id]}%"><i style="width:${r[x.id]}%"></i></div></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   $('#excsv').onclick = exportCSV;
@@ -408,7 +417,9 @@ function shome() {
   const s = me();
   if (!s) { app.innerHTML = `<div class="card">حسابك غير مرتبط بسجل طالب. تواصل مع المعلّم.</div>`; return; }
   const mine = assigns.filter(a => tgt(a).includes(s) && !done[s.id].has(a.id)), n = done[s.id].size;
-  app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
+  const myRec = recitations.filter(r => r.student_id === s.id);
+  const recOk = myRec.filter(r => r.status === 'approved').length, recWait = myRec.filter(r => r.status === 'pending').length;
+  app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
   <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(a.due)}</div></div><button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +
     `<h2>موادي</h2><div class="grid">${SECS.map(x => {
       const it = D.items.filter(i => i.sec === x.id && LV.indexOf(i.lv) <= LV.indexOf(s.lv));
@@ -505,6 +516,94 @@ const RECITERS = [
   ['ar.husary', 'محمود خليل الحصري'],
   ['ar.minshawi', 'محمد صديق المنشاوي']
 ];
+const RECT = {pending: 'قيد المراجعة', approved: 'مقبولة', review: 'تحتاج إعادة'};
+
+/* ---------- تسجيل تلاوة الطالب ---------- */
+function reciteDlg(surah, ayah, surahName) {
+  const d = $('#dlg');
+  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">تسجيل تلاوة</h2><p class="m">${E(surahName)} — الآية ${N(ayah)}</p><div class="card" id="rstat">اضغط «ابدأ التسجيل» ثم تلا الآية بصوت واضح.</div><div class="row" style="margin-top:14px;flex-wrap:wrap"><button class="btn" id="rgo">ابدأ التسجيل</button><button class="btn alt" id="rsend" disabled>إرسال للمعلّم</button><button class="btn alt" id="rx">إغلاق</button></div>`;
+  d.showModal();
+  const stat = $('#rstat'), goBtn = $('#rgo'), sendBtn = $('#rsend');
+  let mr = null, stream = null, chunks = [], blob = null;
+  const ext = t => /mp4/.test(t) ? 'm4a' : /ogg/.test(t) ? 'ogg' : /wav/.test(t) ? 'wav' : 'webm';
+  const stopStream = () => { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } };
+  $('#rx').onclick = () => { if (mr?.state === 'recording') mr.stop(); stopStream(); d.close(); };
+  goBtn.onclick = async () => {
+    if (mr?.state === 'recording') { mr.stop(); return; }
+    try {
+      stopStream(); chunks = []; blob = null; sendBtn.disabled = true;
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('هذا المتصفح لا يدعم تسجيل الصوت');
+      stream = await navigator.mediaDevices.getUserMedia({audio: true});
+      const rec = new MediaRecorder(stream); mr = rec;
+      rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        stopStream();
+        blob = new Blob(chunks, {type: rec.mimeType || 'audio/webm'});
+        if (!blob.size) { stat.textContent = 'لم يُسجَّل صوت. حاول مرة أخرى.'; return; }
+        if (blob.size > 5 * 1024 * 1024) { stat.textContent = 'التسجيل كبير جداً (أكثر من 5 ميغابايت). أعد التسجيل بمدة أقصر.'; blob = null; return; }
+        stat.textContent = `تم التسجيل (${N(Math.round(blob.size / 1024))} كيلوبايت). أرسله للمعلّم أو أعد التسجيل.`;
+        sendBtn.disabled = false;
+        goBtn.textContent = 'إعادة التسجيل';
+      };
+      rec.start();
+      stat.textContent = 'جارٍ التسجيل... اقرأ الآية ثم اضغط «إيقاف التسجيل».';
+      goBtn.textContent = 'إيقاف التسجيل';
+    } catch (err) {
+      stat.textContent = 'تعذّر التسجيل: ' + err.message;
+      stopStream();
+    }
+  };
+  sendBtn.onclick = async () => {
+    if (!blob || !sid) return;
+    sendBtn.disabled = true;
+    const path = `${sid}/${surah}-${ayah}-${Date.now()}.${ext(blob.type)}`;
+    const {error: ue} = await sb.storage.from('recitations').upload(path, blob, {contentType: (blob.type || 'audio/webm').split(';')[0], upsert: false});
+    if (ue) { toast('تعذّر رفع التلاوة: ' + ue.message); sendBtn.disabled = false; return; }
+    const {data, error: ie} = await sb.from('recitations')
+      .insert({student_id: sid, surah, ayah, storage_path: path, status: 'pending'})
+      .select().single();
+    if (ie) {
+      await sb.storage.from('recitations').remove([path]);
+      toast('تعذّر حفظ التلاوة: ' + ie.message); sendBtn.disabled = false; return;
+    }
+    recitations.unshift(data);
+    d.close(); toast('أُرسلت التلاوة بانتظار مراجعة المعلّم');
+  };
+}
+
+/* ---------- مراجعة التلاوات (المعلّم) ---------- */
+function trec() {
+  const list = recitations.slice();
+  const pending = list.filter(r => r.status === 'pending').length;
+  app.innerHTML = `<h1>التلاوات</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(list.length)} تسجيل · ${N(pending)} بانتظار المراجعة</div><button class="btn alt" id="rf">تحديث</button></div>` +
+    (list.length ? list.map(r => {
+      const s = students.find(x => x.id === r.student_id);
+      const sur = D.q[r.surah - 1]?.name || N(r.surah);
+      return `<div class="card"><div class="row"><div class="grow"><b>${E(s?.n || r.student_id)}</b> <span class="tag">${N(r.surah)}. ${E(sur)} — الآية ${N(r.ayah)}</span> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">${new Date(r.created_at).toLocaleString('ar-EG')}${r.teacher_note ? ' · ' + E(r.teacher_note) : ''}</div></div></div><audio controls data-rec="${r.id}" style="width:100%;margin:10px 0"></audio><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn" data-ap="${r.id}">اعتماد</button><button class="btn alt" data-rv="${r.id}">يحتاج إعادة</button></div></div>`;
+    }).join('') : `<div class="card">لا توجد تلاوات بعد. يستطيع الطالب تسجيل تلاوته من صفحة القرآن.</div>`);
+  $('#rf').onclick = () => loadData().then(render);
+  list.forEach(async r => {
+    const {data, error} = await sb.storage.from('recitations').createSignedUrl(r.storage_path, 3600);
+    const el = app.querySelector(`[data-rec="${r.id}"]`);
+    if (!error && data?.signedUrl && el) el.src = data.signedUrl;
+    else if (error && el) el.outerHTML = `<p class="m">تعذّر تحميل التلاوة: ${E(error.message)}</p>`;
+  });
+  const review = async (id, status) => {
+    const note = status === 'approved'
+      ? (prompt('ملاحظة للمعلّم (اختياري):', '') || '')
+      : (prompt('سبب الإعادة (مثلاً: مخارج الحروف):', '') || '');
+    const {error} = await sb.from('recitations')
+      .update({status, teacher_note: note, reviewed_at: new Date().toISOString()}).eq('id', id);
+    if (error) { toast('تعذّر حفظ المراجعة: ' + error.message); return; }
+    const r = recitations.find(x => x.id === id);
+    if (r) Object.assign(r, {status, teacher_note: note});
+    toast(status === 'approved' ? 'تم اعتماد التلاوة' : 'تم تسجيل ملاحظة الإعادة');
+    render();
+  };
+  app.querySelectorAll('[data-ap]').forEach(b => b.onclick = () => review(+b.dataset.ap, 'approved'));
+  app.querySelectorAll('[data-rv]').forEach(b => b.onclick = () => review(+b.dataset.rv, 'review'));
+}
+
 function quran() {
   let n = view.n || 1, hide = false;
   let reciter = localStorage.getItem('manara.reciter') || 'ar.alafasy';
@@ -561,7 +660,7 @@ function quran() {
         <label style="margin-inline-start:auto"><input type="checkbox" id="hd" ${hide ? 'checked' : ''}> وضع الحفظ: إخفاء الآيات (اضغط على الآية لإظهارها)</label>
       </div>
       <div class="card ar qtxt" id="qt" style="margin-top:12px"></div>
-      <p class="note">نص القرآن: مشروع Tanzil (tanzil.net)، رواية حفص، دون أي تعديل. التلاوة من خدمة التلاوة القرآنية (cdn.islamic.network) بالقارئ المختار، وتحتاج اتصالاً بالإنترنت. لم تُراجَع بعد من مختص.</p>`;
+      <p class="note">نص القرآن: مشروع Tanzil (tanzil.net)، رواية حفص، دون أي تعديل. التلاوة من خدمة التلاوة القرآنية (cdn.islamic.network) بالقارئ المختار، وتحتاج اتصالاً بالإنترنت. للطالب: زر 🎙️ بجانب كل آية يرسل تسجيله إلى المعلّم للمراجعة. لم تُراجَع النصوص بعد من مختص.</p>`;
     const qt = $('#qt');
     if (n !== 1 && n !== 9) {
       const wrap = document.createElement('div'); wrap.className = 'row basm-row';
@@ -576,7 +675,18 @@ function quran() {
       sp.textContent = t + ' ﴿' + N(i + 1) + '﴾ ';
       sp.onclick = () => sp.classList.toggle('hid');
       const b = document.createElement('button'); b.className = 'btn alt mini'; b.dataset.akey = 'ay' + i; b.dataset.g = keys[i].g; b.textContent = '▶'; b.title = 'استمع إلى الآية ' + N(i + 1); b.setAttribute('aria-label', 'استمع إلى الآية ' + N(i + 1));
-      row.append(sp, b); qt.appendChild(row);
+      row.append(sp, b);
+      if (!isTeacher() && sid) {
+        const rb = document.createElement('button'); rb.className = 'btn alt mini'; rb.textContent = '🎙️'; rb.title = 'سجّل تلاوة هذه الآية'; rb.setAttribute('aria-label', 'سجّل تلاوة الآية ' + N(i + 1));
+        rb.onclick = () => reciteDlg(n, i + 1, s.name);
+        row.appendChild(rb);
+      }
+      const mine = recitations.filter(r => r.surah === n && r.ayah === i + 1).slice(-1)[0];
+      if (mine) {
+        const tag = document.createElement('span'); tag.className = 'tag'; tag.style.alignSelf = 'center'; tag.textContent = RECT[mine.status] || mine.status;
+        row.appendChild(tag);
+      }
+      qt.appendChild(row);
     });
     app.appendChild(audio);
     qt.querySelectorAll('[data-g]').forEach(b => b.onclick = () => play(+b.dataset.g, b.dataset.akey));

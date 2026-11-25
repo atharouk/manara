@@ -256,3 +256,56 @@ insert into public.assignments (lesson_id, target, due) values
   ('s-hira', 'all', 'الخميس'),
   ('t-noon-tanween', 's1', 'السبت')
 on conflict (lesson_id, target) do nothing;
+
+-- ---------- تلاوات الطلاب: تسجيل صوتي + مراجعة المعلّم ----------
+create table if not exists public.recitations (
+  id           bigint generated always as identity primary key,
+  student_id   text not null references public.students(id) on delete cascade,
+  surah        integer not null check (surah between 1 and 114),
+  ayah         integer not null check (ayah > 0),
+  storage_path text not null,
+  status       text not null default 'pending'
+               check (status in ('pending', 'approved', 'review')),
+  teacher_note text,
+  created_at   timestamptz not null default now(),
+  reviewed_at  timestamptz
+);
+alter table public.recitations enable row level security;
+
+drop policy if exists "teacher_all" on public.recitations;
+drop policy if exists "student_read" on public.recitations;
+drop policy if exists "student_insert" on public.recitations;
+
+create policy "teacher_all" on public.recitations
+  for all to authenticated using (public.is_teacher()) with check (public.is_teacher());
+create policy "student_read" on public.recitations
+  for select to authenticated using (student_id = public.my_student_id());
+create policy "student_insert" on public.recitations
+  for insert to authenticated
+  with check (student_id = public.my_student_id() and status = 'pending');
+
+revoke all on public.recitations from anon;
+grant select, insert, update, delete on public.recitations to authenticated;
+
+-- مسار الملفات: {student_id}/{surah}-{ayah}-{timestamp}.webm
+insert into storage.buckets (id, name, public)
+values ('recitations', 'recitations', false)
+on conflict (id) do update set public = false;
+
+drop policy if exists "recitations_teacher_read" on storage.objects;
+drop policy if exists "recitations_student_read" on storage.objects;
+drop policy if exists "recitations_student_insert" on storage.objects;
+drop policy if exists "recitations_student_delete" on storage.objects;
+
+create policy "recitations_teacher_read" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'recitations' and public.is_teacher());
+create policy "recitations_student_read" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'recitations' and split_part(name, '/', 1) = public.my_student_id());
+create policy "recitations_student_insert" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'recitations' and split_part(name, '/', 1) = public.my_student_id());
+create policy "recitations_student_delete" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'recitations' and split_part(name, '/', 1) = public.my_student_id());
