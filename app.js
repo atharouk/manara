@@ -168,6 +168,7 @@ function wireLate() {
 const auth = $('#auth');
 let students = [], done = {}, assigns = [], roles = [], recitations = [];
 let mode = 'T', sid = null, view = {p: 'home'}, user = null, role = 'teacher';
+const reportFilter = {q: '', lv: '', sort: 'pct'};
 const isTeacher = () => role === 'teacher';
 
 function toast(t) {
@@ -411,8 +412,9 @@ function thome() {
 function tstud() {
   app.innerHTML = `<h1>الطلاب</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(students.length)} طالب مسجّل · ${N(roles.filter(r => r.role === 'student').length)} حساب طالب</div><button class="btn" id="adds">+ إضافة طالب</button></div><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>التقدم في مستواه</th><th>أنجز</th><th>الحساب</th><th>إجراءات</th></tr></thead><tbody>${students.map(s => {
     const p = prog(s), acc = roles.find(r => r.student_id === s.id);
-    return `<tr><td><b>${E(s.n)}</b></td><td><span class="tag">${s.lv}</span></td><td><div class="bar" title="${p.pct}%"><i style="width:${p.pct}%"></i></div></td><td>${N(done[s.id].size)} درساً</td><td>${acc ? `<span class="tag">${E(acc.email || 'مربوط')}</span>` : '<span class="m">—</span>'}</td><td class="row" style="gap:4px;flex-wrap:wrap"><button class="btn alt" data-v="${s.id}">عرض</button><button class="btn alt" data-e="${s.id}">تعديل</button><button class="btn alt" data-ac="${s.id}">حساب</button><button class="btn alt" data-d="${s.id}">حذف</button></td></tr>`;
+    return `<tr><td><b>${E(s.n)}</b></td><td><span class="tag">${s.lv}</span></td><td><div class="bar" title="${p.pct}%"><i style="width:${p.pct}%"></i></div></td><td>${N(done[s.id].size)} درساً</td><td>${acc ? `<span class="tag">${E(acc.email || 'مربوط')}</span>` : '<span class="m">—</span>'}</td><td class="row" style="gap:4px;flex-wrap:wrap"><button class="btn alt" data-p="${s.id}">ملف</button><button class="btn alt" data-v="${s.id}">عرض</button><button class="btn alt" data-e="${s.id}">تعديل</button><button class="btn alt" data-ac="${s.id}">حساب</button><button class="btn alt" data-d="${s.id}">حذف</button></td></tr>`;
   }).join('')}</tbody></table></div>`;
+  app.querySelectorAll('[data-p]').forEach(b => b.onclick = () => profileDlg(b.dataset.p));
   app.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { mode = 'S'; sid = b.dataset.v; go({p: 'home'}); });
   app.querySelectorAll('[data-e]').forEach(b => b.onclick = () => studentDlg(b.dataset.e));
   app.querySelectorAll('[data-ac]').forEach(b => b.onclick = () => accountDlg(b.dataset.ac));
@@ -448,6 +450,38 @@ function studentDlg(id) {
     render();
   };
 }
+function profileDlg(id) {
+  const s = students.find(x => x.id === id);
+  if (!s) return;
+  const p = prog(s), acc = roles.find(r => r.student_id === id);
+  const myAssigns = assigns.filter(a => tgt(a).includes(s));
+  const myRec = recitations.filter(r => r.student_id === id);
+  const late = lateRecitations(id).length;
+  const subs = SECS.map(x => {
+    const it = D.items.filter(i => i.sec === x.id);
+    const c = it.filter(i => done[id].has(i.id)).length;
+    return {x, c, t: it.length, pct: it.length ? Math.round(c / it.length * 100) : 0};
+  });
+  const d = $('#dlg');
+  d.innerHTML = `<h2 style="margin-top:0;color:var(--ink)">ملف الطالب: ${E(s.n)}</h2>
+    <div class="card"><div class="row"><div class="grow"><b>${E(s.lv)}</b><div class="m">${acc ? E(acc.email || 'حساب مربوط') : 'لا يوجد حساب دخول'}</div></div><span class="tag">${N(p.pct)}% في مستواه</span></div></div>
+    <div class="stats" style="margin:10px 0">
+      <div class="card stat"><b>${N(done[id].size)}</b><span>درس منجز</span></div>
+      <div class="card stat"><b>${N(myRec.filter(r => r.status === 'approved').length)}</b><span>تلاوة مقبولة</span></div>
+      <div class="card stat"><b>${N(myRec.filter(r => r.status === 'pending').length)}</b><span>بانتظار المراجعة</span></div>
+      <div class="card stat"><b>${N(late)}</b><span>تأخير تلاوة</span></div>
+    </div>
+    <h3 style="margin:12px 0 4px">تقدّم المواد</h3>
+    <div class="card">${subs.map(x => `<div class="row" style="margin:6px 0"><div class="grow">${x.x.icon} ${E(x.x.t)} <span class="m">${N(x.c)}/${N(x.t)}</span></div><div style="width:40%"><div class="bar" title="${x.pct}%"><i style="width:${x.pct}%"></i></div></div><b>${N(x.pct)}%</b></div>`).join('')}</div>
+    <h3 style="margin:12px 0 4px">المهام المسندة</h3>
+    <div class="card">${myAssigns.length ? myAssigns.map(a => `<div class="row" style="margin:5px 0"><div class="grow">${E(IT[a.id]?.t || a.id)}<div class="m">${E(dueInfo(a).label)}</div></div>${done[id].has(a.id) ? '<span class="tag ok">✓ منجز</span>' : dueTag(a)}</div>`).join('') : '<div class="m">لا توجد مهام مسندة.</div>'}</div>
+    <h3 style="margin:12px 0 4px">التلاوات</h3>
+    <div class="card">${myRec.length ? myRec.map(r => `<div class="row" style="margin:5px 0;flex-wrap:wrap"><div class="grow">${recWhere(r)}<div class="m">${new Date(r.created_at).toLocaleString('ar-EG')}</div></div><span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span>${quizTag(r)}</div>`).join('') : '<div class="m">لا توجد تلاوات مسجّلة.</div>'}</div>
+    <div class="row" style="margin-top:14px"><button class="btn" id="px">إغلاق</button></div>`;
+  d.showModal();
+  $('#px').onclick = () => d.close();
+}
+
 function accountDlg(id) {
   const s = students.find(x => x.id === id);
   const acc = roles.find(r => r.student_id === id);
@@ -575,13 +609,16 @@ function reportData() {
 }
 const csvCell = v => `"${String(v).replace(/"/g, '""')}"`;
 function exportCSV() {
-  const {subs, rows, allPct, allDone, ready, approved, pending} = reportData();
+  const {subs, allPct, allDone, ready, approved, pending} = reportData();
+  const rows = reportRows();
   const head = ['الطالب', 'المستوى', 'الإنجاز العام %', 'الدروس المنجزة', 'تلاوات مقبولة',
     ...subs.flatMap(({x}) => [`${x.t} %`, `${x.t} (منجز/إجمالي)`])];
   const lines = [
     ['تقرير منارة', new Date().toLocaleString('ar-EG')],
     ['الإنجاز العام %', allPct], ['الدروس المنجزة', allDone], ['جاهزون للترقية', ready],
     ['تلاوات مقبولة', approved], ['تلاوات بانتظار المراجعة', pending],
+    ['النتائج المعروضة', `${rows.length} من ${students.length}`],
+    ['البحث', reportFilter.q || '—'], ['المستوى', reportFilter.lv || 'الكل'],
     [], head,
     ...rows.map(r => [r.name, r.level, r.pct, r.done, r.rec,
       ...subs.flatMap(({x}) => [r[x.id], r[x.id + '_cnt']])
@@ -601,16 +638,52 @@ function printPDF() {
   window.addEventListener('afterprint', () => { document.title = old; }, {once: true});
   window.print();
 }
+function reportRows() {
+  const q = reportFilter.q.trim().toLowerCase();
+  const rows = reportData().rows.filter(r =>
+    (!q || r.name.toLowerCase().includes(q)) && (!reportFilter.lv || r.level === reportFilter.lv));
+  const by = {
+    pct: (a, b) => b.pct - a.pct,
+    name: (a, b) => a.name.localeCompare(b.name, 'ar'),
+    done: (a, b) => b.done - a.done,
+    rec: (a, b) => b.rec - a.rec
+  };
+  return rows.sort(by[reportFilter.sort] || by.pct);
+}
+function refreshReportTable() {
+  const body = $('#rbody');
+  if (!body) return;
+  const rows = reportRows();
+  body.innerHTML = rows.length ? rows.map(r => `<tr><td><b>${E(r.name)}</b></td><td>${E(r.level)}</td><td><div class="bar" title="${r.pct}%"><i style="width:${r.pct}%"></i></div></td>${SECS.map(x => `<td><div class="bar" title="${r[x.id]}%"><i style="width:${r[x.id]}%"></i></div></td>`).join('')}</tr>`).join('')
+    : `<tr><td colspan="${SECS.length + 3}" class="m">لا توجد نتائج مطابقة للبحث أو التصفية.</td></tr>`;
+  const c = $('#rcount');
+  if (c) c.textContent = `${N(rows.length)} من ${N(students.length)} طالب`;
+}
 function treports() {
-  const {subs, rows, allDone, allPct, ready, approved, pending} = reportData();
+  const {subs, allDone, allPct, ready, approved, pending} = reportData();
   app.innerHTML = `<div class="print-head"><h1>منارة — تقرير المتابعة</h1><p>تاريخ التقرير: ${new Date().toLocaleString('ar-EG')}</p></div>
     <h1>التقارير</h1>
-    <div class="row" style="margin-bottom:10px"><div class="grow m">جاهز للتصدير والمشاركة</div><button class="btn alt" id="excsv">تصدير CSV</button><button class="btn" id="expdf">حفظ PDF</button></div>
+    <div class="row" style="margin-bottom:10px;flex-wrap:wrap;gap:6px">
+      <input id="rq" aria-label="بحث باسم الطالب" placeholder="ابحث باسم الطالب" value="${E(reportFilter.q)}" style="max-width:220px">
+      <select id="rl" aria-label="تصفية حسب المستوى"><option value="">كل المستويات</option>${LV.map(l => `<option value="${l}" ${reportFilter.lv === l ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select id="rsort" aria-label="ترتيب النتائج">
+        <option value="pct" ${reportFilter.sort === 'pct' ? 'selected' : ''}>الأعلى إنجازاً</option>
+        <option value="name" ${reportFilter.sort === 'name' ? 'selected' : ''}>حسب الاسم</option>
+        <option value="done" ${reportFilter.sort === 'done' ? 'selected' : ''}>الأكثر دروساً</option>
+        <option value="rec" ${reportFilter.sort === 'rec' ? 'selected' : ''}>الأكثر تلاوات</option>
+      </select>
+      <span class="grow m" id="rcount"></span>
+      <button class="btn alt" id="excsv">تصدير CSV</button><button class="btn" id="expdf">حفظ PDF</button>
+    </div>
     <div class="stats"><div class="card stat"><b>${N(allPct)}%</b><span>إنجاز عام</span></div><div class="card stat"><b>${N(allDone)}</b><span>درس منجز</span></div><div class="card stat"><b>${N(ready)}</b><span>جاهز للترقية</span></div><div class="card stat"><b>${N(approved)}</b><span>تلاوات مقبولة</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div></div>
     <h2>إنجاز المواد</h2><div class="card">${subs.map(s => `<div class="row" style="margin:8px 0"><div class="grow"><b>${s.icon} ${s.t}</b><div class="m">${N(s.cnt)} / ${N(s.total)} درس</div></div><div style="width:55%"><div class="bar" title="${s.pct}%"><i style="width:${s.pct}%"></i></div></div><b>${N(s.pct)}%</b></div>`).join('')}</div>
-    <h2>تقدّم الطلاب</h2><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>عام</th>${SECS.map(x => `<th>${x.icon}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr><td><b>${E(r.name)}</b></td><td>${E(r.level)}</td><td><div class="bar" title="${r.pct}%"><i style="width:${r.pct}%"></i></div></td>${SECS.map(x => `<td><div class="bar" title="${r[x.id]}%"><i style="width:${r[x.id]}%"></i></div></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    <h2>تقدّم الطلاب</h2><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>عام</th>${SECS.map(x => `<th>${x.icon}</th>`).join('')}</tr></thead><tbody id="rbody"></tbody></table></div>`;
+  $('#rq').oninput = e => { reportFilter.q = e.target.value; refreshReportTable(); };
+  $('#rl').onchange = e => { reportFilter.lv = e.target.value; refreshReportTable(); };
+  $('#rsort').onchange = e => { reportFilter.sort = e.target.value; refreshReportTable(); };
   $('#excsv').onclick = exportCSV;
   $('#expdf').onclick = printPDF;
+  refreshReportTable();
 }
 
 /* ---------- Student views ---------- */
