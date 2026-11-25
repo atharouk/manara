@@ -306,9 +306,21 @@ create policy "recitations_student_read" on storage.objects
 create policy "recitations_student_insert" on storage.objects
   for insert to authenticated
   with check (bucket_id = 'recitations' and split_part(name, '/', 1) = public.my_student_id());
+-- ملف التلاوة يُحذف فقط إن لم تُعتمد بعد (بانتظار المراجعة أو تحتاج إعادة) أو أصبح يتيماً
+create or replace function public.can_delete_recitation(p_path text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select split_part(p_path, '/', 1) = public.my_student_id()
+    and (
+      not exists (select 1 from public.recitations r where r.storage_path = p_path)
+      or exists (select 1 from public.recitations r where r.storage_path = p_path and r.status in ('pending', 'review'))
+    );
+$$;
+revoke all on function public.can_delete_recitation(text) from public, anon;
+grant execute on function public.can_delete_recitation(text) to authenticated;
+
 create policy "recitations_student_delete" on storage.objects
   for delete to authenticated
-  using (bucket_id = 'recitations' and split_part(name, '/', 1) = public.my_student_id());
+  using (bucket_id = 'recitations' and public.can_delete_recitation(name));
 
 -- ---------- اعتماد التلاوة يمنح إنجاز الدرس المرتبط تلقائياً ----------
 alter table public.recitations add column if not exists lesson_id text;
@@ -339,3 +351,9 @@ drop trigger if exists recitations_approved_completion on public.recitations;
 create trigger recitations_approved_completion
   after insert or update of status on public.recitations
   for each row execute function public.recitation_approved_completion();
+
+-- ---------- حذف الطالب لتلاوته قبل اعتماد المعلّم ----------
+drop policy if exists "student_delete_pending" on public.recitations;
+create policy "student_delete_pending" on public.recitations
+  for delete to authenticated
+  using (student_id = public.my_student_id() and status in ('pending', 'review'));

@@ -443,14 +443,18 @@ function shome() {
   if (!s) { app.innerHTML = `<div class="card">حسابك غير مرتبط بسجل طالب. تواصل مع المعلّم.</div>`; return; }
   const mine = assigns.filter(a => tgt(a).includes(s) && !done[s.id].has(a.id)), n = done[s.id].size;
   const myRec = recitations.filter(r => r.student_id === s.id);
-  const recOk = myRec.filter(r => r.status === 'approved').length, recWait = myRec.filter(r => r.status === 'pending').length;
-  app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
+  const pend = myRec.filter(r => r.status !== 'approved');
+  const recOk = myRec.filter(r => r.status === 'approved').length;
+  const recWait = myRec.filter(r => r.status === 'pending').length, recRev = myRec.filter(r => r.status === 'review').length;
+  app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
+  ${pend.length ? `<h2>تلاوات تحتاج متابعة</h2>` + pend.map(r => `<div class="card task"><div class="grow"><b>${N(r.surah)}. ${E(D.q[r.surah - 1]?.name || r.surah)} — الآية ${N(r.ayah)}</b> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">أُرسلت ${new Date(r.created_at).toLocaleString('ar-EG')}</div></div><button class="btn alt" data-rd="${r.id}">🗑️ حذف</button></div>`).join('') : ''}
   <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(a.due)}</div></div><button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +
     `<h2>موادي</h2><div class="grid">${SECS.map(x => {
       const it = D.items.filter(i => i.sec === x.id && LV.indexOf(i.lv) <= LV.indexOf(s.lv));
       return `<button class="sub" data-sec="${x.id}"><span class="em">${x.icon}</span><b>${x.t}</b><div class="m">${N(it.filter(i => done[s.id].has(i.id)).length)} / ${N(it.length)}</div></button>`;
     }).join('')}<button class="sub" data-q="1"><span class="em">📖</span><b>القرآن</b><div class="m">رواية حفص</div></button></div>`;
   app.querySelectorAll('[data-o]').forEach(b => b.onclick = () => go({p: 'lesson', id: b.dataset.o, back: view}));
+  app.querySelectorAll('[data-rd]').forEach(b => b.onclick = () => deleteRecitation(+b.dataset.rd));
   app.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => go({p: 'sec', sec: b.dataset.sec}));
   app.querySelector('[data-q]').onclick = () => go({p: 'quran'});
 }
@@ -603,6 +607,21 @@ function reciteDlg(surah, ayah, surahName) {
   };
 }
 
+/* ---------- حذف التلاوة قبل المراجعة (الطالب فقط) ---------- */
+async function deleteRecitation(id) {
+  const r = recitations.find(x => x.id === id);
+  if (!r || r.status === 'approved') return;
+  if (!confirm('حذف هذه التلاوة؟ يمكنك تسجيلها من جديد.')) return;
+  // حذف السجل أولاً؛ سياسة التخزين تسمح بحذف الملف بعد أن يصبح يتيماً
+  const {error} = await sb.from('recitations').delete().eq('id', id);
+  if (error) { toast('تعذّر حذف التلاوة: ' + error.message); return; }
+  const {error: se} = await sb.storage.from('recitations').remove([r.storage_path]);
+  if (se) console.error('تعذّر حذف ملف التلاوة:', se);
+  recitations = recitations.filter(x => x.id !== id);
+  toast('تم حذف التلاوة');
+  render();
+}
+
 /* ---------- مراجعة التلاوات (المعلّم) ---------- */
 function trec() {
   const list = recitations.slice();
@@ -721,6 +740,12 @@ function quran() {
       if (mine) {
         const tag = document.createElement('span'); tag.className = 'tag'; tag.style.alignSelf = 'center'; tag.textContent = RECT[mine.status] || mine.status;
         row.appendChild(tag);
+        if (!isTeacher() && sid && mine.status !== 'approved') {
+          const db = document.createElement('button'); db.className = 'btn alt mini'; db.textContent = '🗑️';
+          db.title = 'حذف التلاوة قبل المراجعة'; db.setAttribute('aria-label', 'حذف تلاوة الآية ' + N(i + 1));
+          db.onclick = () => deleteRecitation(mine.id);
+          row.appendChild(db);
+        }
       }
       qt.appendChild(row);
     });
