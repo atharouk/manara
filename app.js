@@ -33,6 +33,18 @@ const AYAH_LESSONS = (() => {
   return m;
 })();
 const lessonsFor = (surah, ayah) => AYAH_LESSONS.get(surah + ':' + ayah) || [];
+// عكس الخريطة: من الدرس إلى الآيات التي يمكن تسجيل تلاوة لها
+const LESSON_AYAHS = (() => {
+  const m = new Map();
+  for (const [key, ids] of AYAH_LESSONS) {
+    const [surah, ayah] = key.split(':').map(Number);
+    ids.forEach(id => {
+      if (!m.has(id)) m.set(id, []);
+      if (!m.get(id).some(x => x.surah === surah && x.ayah === ayah)) m.get(id).push({surah, ayah});
+    });
+  }
+  return m;
+})();
 const $ = s => document.querySelector(s),
       app = $('#app'),
       N = n => (+n).toLocaleString('ar-EG');
@@ -96,6 +108,61 @@ function notifyPanel(list, mode = 'plain') {
     return `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">${E(info.label)} · ${N(left)} متبقٍ</div></div>${dueTag(a)}${action}</div>`;
   }).join('');
   return `<div class="card notif"><div class="row"><b>🔔 مهام قريبة الاستحقاق</b><span class="grow"></span><span class="tag w">${N(list.length)}</span></div>${rows}</div>`;
+}
+
+/* ---------- متأخرات تسليم التلاوات ---------- */
+function recCovers(r, lessonId) {
+  if (!r) return false;
+  return r.lesson_id === lessonId || (r.quiz_lessons || []).includes(lessonId) || recLessons(r).includes(lessonId);
+}
+function lateRecitations(forStudent = null) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const out = [];
+  assigns.forEach(a => {
+    // فقط الدروس التي يمكن تسجيل تلاوة لها (لها آية في أمثلة data.js)
+    if (!LESSON_AYAHS.has(a.id)) return;
+    const due = dueDateOf(a);
+    if (!due || due >= today) return;
+    tgt(a).forEach(s => {
+      if (forStudent && s.id !== forStudent) return;
+      if (done[s.id]?.has(a.id)) return; // الدرس منجز: لا تنبيه
+      const recs = recitations.filter(r => r.student_id === s.id && recCovers(r, a.id));
+      if (!recs.length) {
+        out.push({a, s, rec: null, state: 'missing', days: Math.round((today - due) / DAY_MS)});
+        return;
+      }
+      const first = recs.map(r => ({r, day: parseDay(isoDay(new Date(r.created_at)))}))
+                        .sort((x, y) => x.day - y.day)[0];
+      const days = Math.round((first.day - due) / DAY_MS);
+      if (days > 0) out.push({a, s, rec: first.r, state: 'late', days});
+    });
+  });
+  return out.sort((x, y) => y.days - x.days);
+}
+function lateRecPanel(list, mode = 'plain') {
+  if (!list.length) return '';
+  const rows = list.map(x => {
+    const status = x.state === 'missing'
+      ? '<span class="tag late">لم تُسلّم</span>'
+      : `<span class="tag late">سُلّمت متأخرة ${N(x.days)} ${x.days === 1 ? 'يوم' : 'أيام'}</span>`;
+    const detail = `${mode === 'student' ? '' : E(x.s.n) + ' · '}${E(dueInfo(x.a).label)}`;
+    const action = mode === 'student'
+      ? `<button class="btn alt mini" data-lateo="${x.a.id}">سجّل التلاوة</button>`
+      : `<button class="btn alt mini" data-latev="${x.s.id}">عرض الطالب</button>`;
+    return `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${E(IT[x.a.id]?.t || x.a.id)}</b><div class="m">${detail}</div></div>${status}${action}</div>`;
+  }).join('');
+  return `<div class="card notif warn"><div class="row"><b>⏰ متأخرات تسليم التلاوات</b><span class="grow"></span><span class="tag late">${N(list.length)}</span></div>${rows}</div>`;
+}
+function wireLate() {
+  app.querySelectorAll('[data-latev]').forEach(b => b.onclick = () => {
+    mode = 'S'; sid = b.dataset.latev; go({p: 'home'});
+  });
+  app.querySelectorAll('[data-lateo]').forEach(b => b.onclick = () => {
+    const ay = LESSON_AYAHS.get(b.dataset.lateo)?.[0];
+    if (!ay) return;
+    if (view.p !== 'quran' || view.n !== ay.surah) go({p: 'quran', n: ay.surah});
+    reciteDlg(ay.surah, ay.ayah, D.q[ay.surah - 1]?.name || '');
+  });
 }
 
 const auth = $('#auth');
@@ -296,9 +363,13 @@ function side() {
     ? [['home', 'الرئيسية'], ['students', 'الطلاب'], ['cur', 'المنهج'], ['tasks', 'المهام'], ['reports', 'التقارير'], ['recitations', 'التلاوات'], ['quran', 'القرآن']]
     : [['home', 'الرئيسية'], ['quran', 'القرآن'], ...SECS.map(s => ['sec:' + s.id, s.icon + ' ' + s.t])];
   const cur = view.p === 'sec' ? 'sec:' + view.sec : view.p;
-  const bells = nearTasks(mode === 'T' ? null : sid).length;
+  const near = nearTasks(mode === 'T' ? null : sid).length;
+  const late = lateRecitations(mode === 'T' ? null : sid).length;
   $('#side').innerHTML = `<div class="nv">` + it.map(([k, t]) => {
-    const bell = bells && (k === 'home' || k === 'tasks') ? ` <span class="nav-bell">🔔 ${N(bells)}</span>` : '';
+    let bell = '';
+    if (near && (k === 'home' || k === 'tasks')) bell += ` <span class="nav-bell">🔔 ${N(near)}</span>`;
+    if (late && (k === 'home' || k === 'tasks' || (mode === 'S' && k === 'quran')))
+      bell += ` <span class="nav-bell late">⏰ ${N(late)}</span>`;
     return `<button data-k="${k}" class="${cur === k ? 'on' : ''}">${t}${bell}</button>`;
   }).join('') + `</div>`;
   $('#side').querySelectorAll('button').forEach(b => b.onclick = () => {
@@ -314,12 +385,13 @@ $('#st').onchange = e => { sid = e.target.value; go({p: 'home'}); };
 function thome() {
   const rd = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم');
   const pending = recitations.filter(r => r.status === 'pending').length;
-  const soon = nearTasks();
+  const soon = nearTasks(), late = lateRecitations();
   const tot = assigns.reduce((a, x) => a + tgt(x).length, 0),
         dn = assigns.reduce((a, x) => a + tgt(x).filter(s => done[s.id].has(x.id)).length, 0);
   app.innerHTML = `<h1>أهلاً بك يا معلم</h1><div class="stats"><div class="card stat"><b>${N(students.length)}</b><span>طالب</span></div><div class="card stat"><b>${N(assigns.length)}</b><span>مهمة مُسندة</span></div><div class="card stat"><b>${N(dn)} / ${N(tot)}</b><span>تسليمات أُنجزت</span></div><div class="card stat"><b>${N(rd.length)}</b><span>جاهزون للترقية</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div></div>` +
     (pending ? `<div class="card" style="border:2px solid var(--lamp)"><b>${N(pending)} تلاوة بانتظار المراجعة</b><p class="m" style="margin:4px 0 8px">استمع إليها واعتمدها أو اطلب إعادة التسجيل.</p><button class="btn lamp" id="gr">فتح التلاوات</button></div>` : '') +
     notifyPanel(soon, 'teacher') +
+    lateRecPanel(late) +
     (rd.length ? `<div class="card" style="border:2px solid var(--lamp)"><b>أنهوا معظم مستواهم</b>${rd.map(s => `<div class="row" style="margin-top:6px"><span class="grow">${E(s.n)} (${prog(s).pct}%)</span><button class="btn lamp" data-up="${s.id}">ترقية إلى ${LV[LV.indexOf(s.lv) + 1]}</button></div>`).join('')}</div>` : '') +
     (students.length ? `<div class="card"><p style="margin:0 0 10px">من «المنهج» تعاين الدروس وتسندها، ومن «الطلاب» ترى تقدم كل طالب.</p><button class="btn" id="g1">فتح المنهج</button></div>`
       : `<div class="card"><p style="margin:0 0 10px">لا يوجد طلاب بعد. يمكنك البدء بالبيانات التجريبية.</p><button class="btn" id="seed">تحميل بيانات تجريبية</button></div>`);
@@ -327,6 +399,7 @@ function thome() {
   if ($('#gr')) $('#gr').onclick = () => go({p: 'recitations'});
   if ($('#gn')) $('#gn').onclick = () => go({p: 'tasks'});
   if ($('#seed')) $('#seed').onclick = seedDemo;
+  wireLate();
   app.querySelectorAll('[data-up]').forEach(b => b.onclick = () => {
     const s = students.find(x => x.id === b.dataset.up);
     s.lv = LV[LV.indexOf(s.lv) + 1];
@@ -459,7 +532,7 @@ function dueDlg(dbId) {
   };
 }
 function ttasks() {
-  app.innerHTML = `<h1>المهام</h1>` + notifyPanel(nearTasks()) +
+  app.innerHTML = `<h1>المهام</h1>` + notifyPanel(nearTasks()) + lateRecPanel(lateRecitations()) +
     (assigns.length ? assigns.map(a => {
       const t = tgt(a), n = t.filter(s => done[s.id].has(a.id)).length, info = dueInfo(a);
       const label = info.days === null ? E(a.due) : E(info.label) + (a.due && a.due !== DAYS[parseDay(a.date)?.getDay()] && info.label.indexOf(a.due) < 0 ? ` (${E(a.due)})` : '');
@@ -474,6 +547,7 @@ function ttasks() {
     }
   });
   app.querySelectorAll('[data-edue]').forEach(b => b.onclick = () => dueDlg(+b.dataset.edue));
+  wireLate();
 }
 
 function reportData() {
@@ -553,6 +627,7 @@ function shome() {
   const quizDone = myRec.filter(r => r.status === 'approved' && r.quiz_passed);
   app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
   ${notifyPanel(soon, 'student')}
+  ${lateRecPanel(lateRecitations(s.id), 'student')}
   ${(quizRecs.length || quizDone.length) ? `<h2>اختبارات التلاوات</h2>` + quizRecs.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag w">📝 ${r.quiz_at ? `أعد ${N(r.quiz_correct)}/${N(r.quiz_total)}` : 'بانتظار الاختبار'}</span><div class="m">أُعتمدت التلاوة — أجب عن أسئلة قصيرة لتحديد إنجازك.</div></div><button class="btn" data-quiz="${r.id}">ابدأ الاختبار</button></div>`).join('') + (quizDone.length ? `<div class="card"><span class="tag ok">✅ أنهيت ${N(quizDone.length)} اختبار تلاوة</span></div>` : '') : ''}
   ${pend.length ? `<h2>تلاوات تحتاج متابعة</h2>` + pend.map(r => `<div class="card task"><div class="grow"><b>${recWhere(r)}</b> <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">أُرسلت ${new Date(r.created_at).toLocaleString('ar-EG')}</div></div><button class="btn alt" data-rd="${r.id}">🗑️ حذف</button></div>`).join('') : ''}
   <h2>مطلوب منك</h2>` + (mine.length ? mine.map(a => `<div class="card task"><div class="grow"><b>${E(IT[a.id].t)}</b><div class="m">الموعد: ${E(dueInfo(a).label)}</div></div>${dueTag(a)}<button class="btn" data-o="${a.id}">ابدأ</button></div>`).join('') : `<div class="card">لا مهام الآن. اختر مادة من القائمة.</div>`) +
@@ -563,6 +638,7 @@ function shome() {
   app.querySelectorAll('[data-o]').forEach(b => b.onclick = () => go({p: 'lesson', id: b.dataset.o, back: view}));
   app.querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => quizDlg(+b.dataset.quiz));
   app.querySelectorAll('[data-rd]').forEach(b => b.onclick = () => deleteRecitation(+b.dataset.rd));
+  wireLate();
   app.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => go({p: 'sec', sec: b.dataset.sec}));
   app.querySelector('[data-q]').onclick = () => go({p: 'quran'});
 }
@@ -810,12 +886,14 @@ function trec() {
   const list = recitations.slice();
   const pending = list.filter(r => r.status === 'pending').length;
   app.innerHTML = `<h1>التلاوات</h1><div class="row" style="margin-bottom:10px"><div class="grow m">${N(list.length)} تسجيل · ${N(pending)} بانتظار المراجعة</div><button class="btn alt" id="rf">تحديث</button></div>` +
+    lateRecPanel(lateRecitations()) +
     (list.length ? list.map(r => {
       const s = students.find(x => x.id === r.student_id);
       const ln = r.lesson_id ? (IT[r.lesson_id]?.t || r.lesson_id) : '';
       return `<div class="card"><div class="row"><div class="grow"><b>${E(s?.n || r.student_id)}</b> <span class="tag">${recWhere(r)}</span>${ln ? ` <span class="tag">📘 ${E(ln)} (قديم)</span>` : ''}${quizTag(r)} <span class="tag ${r.status === 'approved' ? '' : 'w'}">${RECT[r.status] || r.status}</span><div class="m">${new Date(r.created_at).toLocaleString('ar-EG')}${r.teacher_note ? ' · ' + E(r.teacher_note) : ''}</div></div></div><audio controls data-rec="${r.id}" style="width:100%;margin:10px 0"></audio><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn" data-ap="${r.id}">اعتماد</button><button class="btn alt" data-rv="${r.id}">يحتاج إعادة</button></div></div>`;
     }).join('') : `<div class="card">لا توجد تلاوات بعد. يستطيع الطالب تسجيل تلاوته من صفحة القرآن.</div>`);
   $('#rf').onclick = () => loadData().then(render);
+  wireLate();
   list.forEach(async r => {
     const {data, error} = await sb.storage.from('recitations').createSignedUrl(r.storage_path, 3600);
     const el = app.querySelector(`[data-rec="${r.id}"]`);
