@@ -26,7 +26,7 @@ create table if not exists public.weekly_report_config (
 alter table public.weekly_report_config enable row level security;
 insert into public.weekly_report_config(name, secret)
 values ('cron', '<REPORT_CRON_SECRET>')
-on conflict (name) do nothing;
+on conflict (name) do update set secret = excluded.secret;
 -- لا تترك القيمة أعلاه كما هي؛ استبدلها بالقيمة التي أضفتها في Secrets.
 
 -- 4) جدولة كل جمعة 15:00 UTC = 18:00 بتوقيت الرياض
