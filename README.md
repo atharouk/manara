@@ -136,6 +136,37 @@ git push origin main
 - لا متغيرات بيئة؛ الإعداد في `config.js`.
 - Production URL: `manara-atharok1.vercel.app`.
 
+## 3.1) التقارير الأسبوعية بالبريد (Supabase Edge Function + Resend)
+
+تُرسل رسالة كل **جمعة ٦ مساءً بتوقيت الرياض** (15:00 UTC): ملخّص شامل للمعلّم، ورسالة مخصّصة لكل طالب ببياناته.
+
+### الإعداد لمرة واحدة
+1. أنشئ حساباً في [Resend](https://resend.com) وأضف دوميناً مُتحقَّقاً منه للإرسال.
+2. في Supabase → **Edge Functions → Secrets** أضف:
+   - `RESEND_API_KEY` = مفتاح Resend.
+   - `REPORT_FROM_EMAIL` = بريد المرسل المُتحقَّق منه (مثل `منارة@yourdomain.com`).
+   - `REPORT_TEST_EMAIL` (اختياري) = بريدك لاستقبال نسخة الاختبار.
+   - `REPORT_APP_URL` (اختياري) = رابط التطبيق.
+   - `REPORT_CRON_SECRET` = قيمة سرية عشوائية لمنع استدعاء الدالة من غير المجدول.
+3. انشر الدالة: `supabase functions deploy weekly-report` (أو الصق الكود من `supabase/functions/weekly-report/index.ts` في لوحة Supabase) مع `verify_jwt = false`.
+4. نفّذ `supabase/weekly_report.sql` في SQL Editor؛ يُفعّل `pg_cron` و`pg_net`، ويُنشئ جدولة الجمعة وسجل منع التكرار. **استبدل `<REPORT_CRON_SECRET>` في الملف بالقيمة نفسها التي أضفتها في Secrets** قبل التنفيذ.
+5. استبدل عناوين `@example.com` في حسابات المعلّم/الطلاب بعناوين حقيقية، وإلا سترتد الرسائل.
+
+### اختبار فوري
+```powershell
+curl -X POST 'https://syvsimvfftznetlzdnkz.supabase.co/functions/v1/weekly-report' `
+  -H 'apikey: sb_publishable_a-UApE3lnyX7-XwTAumb9Q_bqooocrL' `
+  -H 'x-manara-cron: <REPORT_CRON_SECRET>' `
+  -H 'Content-Type: application/json' -d '{"test":true}'
+```
+وضع الاختبار يرسل نسخة واحدة فقط ولا يُسجّل الأسبوع، لذلك لا يمنع إرسال الجمعة.
+
+### ملاحظات
+- جدول `weekly_report_logs` يمنع إرسال التقرير نفسه مرتين لنفس المستلم في الأسبوع نفسه.
+- المجدول يقرأ السرّ من `public.weekly_report_config` ويُرسله في `x-manara-cron`، ويُطابق `REPORT_CRON_SECRET` في Secrets.
+- مفاتيح Resend و`REPORT_CRON_SECRET` تُحفظ في Supabase Secrets/قاعدة البيانات فقط، ولا تظهر في الواجهة أو في المستودع.
+- محتوى الرسالة: الإنجاز هذا الأسبوع، التلاوات المقبولة/بانتظار، الإعادات المطلوبة، وأسماء الدروس المُنجزة.
+
 ## 4) ما الذي تحوّل إلى سحابي؟
 
 - `students` ← جدول `students`
@@ -166,8 +197,9 @@ git push origin main
 - ✅ **بحث وتصفية وترتيب في التقارير** مع تصدير CSV للنتائج المعروضة.
 - ✅ **ملف تفصيلي لكل طالب** يضم المواد والمهام والتلاوات وعدد التأخيرات.
 - ✅ **تنبيهات إعادة التلاوات بعد مراجعة المعلّم** مع سبب الإعادة وزر إعادة التسجيل.
+- ✅ **تقارير أسبوعية بالبريد** (Resend + Edge Function) للمعلّم ولكل طالب، كل جمعة ٦ مساءً.
 
 ## 6) أفكار للتطوير القادم
 
-- تقارير أسبوعية تُرسل بالبريد.
 - لوحة متابعة أسبوعية للتلاوات (عدد الطلبات، متوسط زمن الاستجابة).
+- تخصيص مظهر الرسالة وشعار منارة داخل التقرير.
