@@ -344,24 +344,63 @@ function ttasks() {
   });
 }
 
-function treports() {
+function reportData() {
   const subs = SECS.map(x => {
     const it = D.items.filter(i => i.sec === x.id);
-    const total = students.length * it.length;
-    const cnt = students.reduce((a, s) => a + it.filter(i => done[s.id].has(i.id)).length, 0);
-    return {id: x.id, t: x.t, icon: x.icon, total, cnt, pct: total ? Math.round(cnt / total * 100) : 0};
+    return {x, it, total: students.length * it.length,
+      cnt: students.reduce((a, s) => a + it.filter(i => done[s.id].has(i.id)).length, 0)};
+  });
+  const rows = students.map(s => {
+    const r = {name: s.n, level: s.lv, pct: prog(s).pct, done: done[s.id].size};
+    subs.forEach(({x, it}) => {
+      const c = it.filter(i => done[s.id].has(i.id)).length;
+      r[x.id] = it.length ? Math.round(c / it.length * 100) : 0;
+      r[x.id + '_cnt'] = `${c}/${it.length}`;
+    });
+    return r;
   });
   const allDone = students.reduce((a, s) => a + done[s.id].size, 0);
   const allPct = students.length ? Math.round(students.reduce((a, s) => a + prog(s).pct, 0) / students.length) : 0;
   const ready = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم').length;
-  app.innerHTML = `<h1>التقارير</h1>
+  return {subs, rows, allDone, allPct, ready};
+}
+const csvCell = v => `"${String(v).replace(/"/g, '""')}"`;
+function exportCSV() {
+  const {subs, rows, allPct, allDone, ready} = reportData();
+  const head = ['الطالب', 'المستوى', 'الإنجاز العام %', 'الدروس المنجزة',
+    ...subs.flatMap(({x}) => [`${x.t} %`, `${x.t} (منجز/إجمالي)`])];
+  const lines = [
+    ['تقرير منارة', new Date().toLocaleString('ar-EG')],
+    ['الإنجاز العام %', allPct], ['الدروس المنجزة', allDone], ['جاهزون للترقية', ready],
+    [], head,
+    ...rows.map(r => [r.name, r.level, r.pct, r.done,
+      ...subs.flatMap(({x}) => [r[x.id], r[x.id + '_cnt']])
+    ])
+  ];
+  const csv = '\ufeff' + lines.map(r => r.map(csvCell).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = `manara-report-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('تم تنزيل التقرير CSV');
+}
+function printPDF() {
+  const old = document.title;
+  document.title = `منارة — تقرير ${new Date().toLocaleDateString('ar-EG')}`;
+  window.addEventListener('afterprint', () => { document.title = old; }, {once: true});
+  window.print();
+}
+function treports() {
+  const {subs, rows, allDone, allPct, ready} = reportData();
+  app.innerHTML = `<div class="print-head"><h1>منارة — تقرير المتابعة</h1><p>تاريخ التقرير: ${new Date().toLocaleString('ar-EG')}</p></div>
+    <h1>التقارير</h1>
+    <div class="row" style="margin-bottom:10px"><div class="grow m">جاهز للتصدير والمشاركة</div><button class="btn alt" id="excsv">تصدير CSV</button><button class="btn" id="expdf">حفظ PDF</button></div>
     <div class="stats"><div class="card stat"><b>${N(allPct)}%</b><span>إنجاز عام</span></div><div class="card stat"><b>${N(allDone)}</b><span>درس منجز</span></div><div class="card stat"><b>${N(ready)}</b><span>جاهز للترقية</span></div></div>
     <h2>إنجاز المواد</h2><div class="card">${subs.map(s => `<div class="row" style="margin:8px 0"><div class="grow"><b>${s.icon} ${s.t}</b><div class="m">${N(s.cnt)} / ${N(s.total)} درس</div></div><div style="width:55%"><div class="bar" title="${s.pct}%"><i style="width:${s.pct}%"></i></div></div><b>${N(s.pct)}%</b></div>`).join('')}</div>
-    <h2>تقدّم الطلاب</h2><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>عام</th>${SECS.map(x => `<th>${x.icon}</th>`).join('')}</tr></thead><tbody>${students.map(s => `<tr><td><b>${E(s.n)}</b></td><td>${s.lv}</td><td><div class="bar" title="${prog(s).pct}%"><i style="width:${prog(s).pct}%"></i></div></td>${SECS.map(x => {
-      const it = D.items.filter(i => i.sec === x.id);
-      const c = it.filter(i => done[s.id].has(i.id)).length, p = it.length ? Math.round(c / it.length * 100) : 0;
-      return `<td><div class="bar" title="${p}%"><i style="width:${p}%"></i></div></td>`;
-    }).join('')}</tr>`).join('')}</tbody></table></div>`;
+    <h2>تقدّم الطلاب</h2><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>عام</th>${SECS.map(x => `<th>${x.icon}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr><td><b>${E(r.name)}</b></td><td>${E(r.level)}</td><td><div class="bar" title="${r.pct}%"><i style="width:${r.pct}%"></i></div></td>${SECS.map(x => `<td><div class="bar" title="${r[x.id]}%"><i style="width:${r[x.id]}%"></i></div></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  $('#excsv').onclick = exportCSV;
+  $('#expdf').onclick = printPDF;
 }
 
 /* ---------- Student views ---------- */
@@ -461,23 +500,94 @@ function lesson() {
 }
 
 /* ---------- Quran ---------- */
+const RECITERS = [
+  ['ar.alafasy', 'مشاري العفاسي'],
+  ['ar.husary', 'محمود خليل الحصري'],
+  ['ar.minshawi', 'محمد صديق المنشاوي']
+];
 function quran() {
   let n = view.n || 1, hide = false;
+  let reciter = localStorage.getItem('manara.reciter') || 'ar.alafasy';
+  let rate = +(localStorage.getItem('manara.rate') || 1);
+  let auto = localStorage.getItem('manara.auto') === '1';
+  const audio = new Audio();
+  audio.preload = 'none';
+  audio.style.display = 'none';
+  let current = null, keys = [], playToken = 0;
+  const src = g => `https://cdn.islamic.network/quran/audio/128/${reciter}/${g}.mp3`;
+
+  function sync() {
+    app.querySelectorAll('[data-akey]').forEach(b => {
+      const on = !!current && b.dataset.akey === current.key && !audio.paused;
+      b.classList.toggle('on', on);
+      b.textContent = on ? '❚❚' : '▶';
+      b.setAttribute('aria-label', on ? 'إيقاف التلاوة' : 'تشغيل التلاوة');
+    });
+  }
+  function stop() { playToken++; audio.pause(); audio.currentTime = 0; current = null; sync(); }
+  function play(g, key, chain = false) {
+    if (!chain && current?.key === key && !audio.paused) { stop(); return; }
+    const token = ++playToken;
+    current = {g, key};
+    audio.src = src(g);
+    audio.playbackRate = rate;
+    audio.play()
+      .then(() => { if (token === playToken) sync(); })
+      .catch(err => {
+        if (token !== playToken) return;
+        toast('تعذّر تشغيل التلاوة: ' + err.message);
+        current = null; sync();
+      });
+    sync();
+  }
+  audio.onended = () => {
+    if (!auto || !current) { current = null; sync(); return; }
+    const i = keys.findIndex(k => k.key === current.key), nx = keys[i + 1];
+    if (nx) play(nx.g, nx.key, true); else { current = null; sync(); }
+  };
+  audio.onerror = () => { toast('تعذّر تحميل التلاوة. جرّب قارئاً آخر أو تحقق من الاتصال.'); current = null; sync(); };
+
   function draw() {
     const s = D.q[n - 1];
-    app.innerHTML = `<h1>القرآن (رواية حفص)</h1><div class="row"><select id="sf" style="width:auto">${D.q.map(x => `<option value="${x.id}" ${x.id === n ? 'selected' : ''}>${N(x.id)}. ${x.name}</option>`).join('')}</select><label style="margin:0"><input type="checkbox" id="hd" ${hide ? 'checked' : ''}> وضع الحفظ: إخفاء الآيات (اضغط على الآية لإظهارها)</label></div>
-    <div class="card ar qtxt" id="qt" style="margin-top:12px"></div><p class="note">نص القرآن: مشروع Tanzil (tanzil.net)، رواية حفص، دون أي تعديل. لم تُراجَع بعد من مختص. تلاوة الحصري ستُربط بعد اختبار الروابط.</p>`;
+    const base = D.q.slice(0, n - 1).reduce((a, x) => a + x.v.length, 0);
+    keys = s.v.map((_, i) => ({g: base + i + 1, key: 'ay' + i}));
+    app.innerHTML = `<h1>القرآن (رواية حفص)</h1>
+      <div class="row qbar">
+        <select id="sf" aria-label="السورة">${D.q.map(x => `<option value="${x.id}" ${x.id === n ? 'selected' : ''}>${N(x.id)}. ${x.name}</option>`).join('')}</select>
+        <label>القارئ <select id="rc" aria-label="القارئ">${RECITERS.map(([id, name]) => `<option value="${id}" ${id === reciter ? 'selected' : ''}>${name}</option>`).join('')}</select></label>
+        <label>السرعة <select id="rt" aria-label="سرعة التلاوة">${[0.75, 1, 1.25, 1.5].map(v => `<option value="${v}" ${v === rate ? 'selected' : ''}>${v}×</option>`).join('')}</select></label>
+        <label><input type="checkbox" id="au" ${auto ? 'checked' : ''}> تتابع تلقائي</label>
+        <button class="btn alt" id="plall">▶ تلاوة السورة</button><button class="btn alt" id="stp">■ إيقاف</button>
+        <label style="margin-inline-start:auto"><input type="checkbox" id="hd" ${hide ? 'checked' : ''}> وضع الحفظ: إخفاء الآيات (اضغط على الآية لإظهارها)</label>
+      </div>
+      <div class="card ar qtxt" id="qt" style="margin-top:12px"></div>
+      <p class="note">نص القرآن: مشروع Tanzil (tanzil.net)، رواية حفص، دون أي تعديل. التلاوة من خدمة التلاوة القرآنية (cdn.islamic.network) بالقارئ المختار، وتحتاج اتصالاً بالإنترنت. لم تُراجَع بعد من مختص.</p>`;
     const qt = $('#qt');
-    if (n !== 1 && n !== 9) { const p = document.createElement('div'); p.style.textAlign = 'center'; p.textContent = D.basm; qt.appendChild(p); }
+    if (n !== 1 && n !== 9) {
+      const wrap = document.createElement('div'); wrap.className = 'row basm-row';
+      const p = document.createElement('span'); p.className = 'ar'; p.textContent = D.basm;
+      const b = document.createElement('button'); b.className = 'btn alt mini'; b.dataset.akey = 'basm'; b.dataset.g = '1'; b.textContent = '▶'; b.title = 'استمع إلى البسملة'; b.setAttribute('aria-label', 'استمع إلى البسملة');
+      wrap.append(p, b); qt.appendChild(wrap);
+    }
     s.v.forEach((t, i) => {
+      const row = document.createElement('div'); row.className = 'ay-row';
       const sp = document.createElement('span');
       sp.className = 'ay' + (hide ? ' hid' : '');
       sp.textContent = t + ' ﴿' + N(i + 1) + '﴾ ';
       sp.onclick = () => sp.classList.toggle('hid');
-      qt.appendChild(sp);
+      const b = document.createElement('button'); b.className = 'btn alt mini'; b.dataset.akey = 'ay' + i; b.dataset.g = keys[i].g; b.textContent = '▶'; b.title = 'استمع إلى الآية ' + N(i + 1); b.setAttribute('aria-label', 'استمع إلى الآية ' + N(i + 1));
+      row.append(sp, b); qt.appendChild(row);
     });
-    $('#sf').onchange = e => { n = +e.target.value; view.n = n; draw(); };
+    app.appendChild(audio);
+    qt.querySelectorAll('[data-g]').forEach(b => b.onclick = () => play(+b.dataset.g, b.dataset.akey));
+    $('#sf').onchange = e => { n = +e.target.value; view.n = n; stop(); draw(); };
+    $('#rc').onchange = e => { reciter = e.target.value; localStorage.setItem('manara.reciter', reciter); stop(); };
+    $('#rt').onchange = e => { rate = +e.target.value; localStorage.setItem('manara.rate', String(rate)); audio.playbackRate = rate; };
+    $('#au').onchange = e => { auto = e.target.checked; localStorage.setItem('manara.auto', auto ? '1' : '0'); };
     $('#hd').onchange = e => { hide = e.target.checked; draw(); };
+    $('#plall').onclick = () => { if (keys[0]) play(keys[0].g, keys[0].key); };
+    $('#stp').onclick = stop;
+    sync();
   }
   draw();
 }
