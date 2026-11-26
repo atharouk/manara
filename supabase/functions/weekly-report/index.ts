@@ -86,7 +86,7 @@ Deno.serve(async (req: Request) => {
     const appUrl = Deno.env.get('REPORT_APP_URL') || 'https://manara-atharok1.vercel.app';
     // Resend يسمح بالإرسال من onboarding@resend.dev إلى بريد الحساب فقط.
     // إلى أن يُضاف دومين مُتحقَّق، نُرسل للمعلّم ونتخطى رسائل الطلاب بدل إهدار المحاولات.
-    const sharedDomain = /@(?:onboarding|[a-z0-9-]+)\.resend\.dev$/i.test(from);
+    const sharedDomain = /@(?:[a-z0-9-]+\.)?resend\.dev$/i.test(from);
     const resend = new Resend(apiKey);
 
     const now = new Date();
