@@ -509,28 +509,40 @@ $('#ch-lantern').onclick = () => celebrate('lantern');
 
 /* ---------- Smart board ---------- */
 const BOARD_COLORS = ['#12292e', '#b4442f', '#1c8a86', '#17745a', '#d97706', '#7c3aed', '#2563eb', '#ffffff'];
-let board = null;
-const boardKey = () => 'manara.board.' + (mode === 'T' ? 'teacher' : (sid || 'guest'));
-function boardLoad(key) {
-  let data = null;
-  try { data = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
+let board = null, boardLoadToken = 0, boardSaveTimer = null;
+// المعلّم لوحته الخاصة 'teacher'، والطالب لوحته بمعرّفه. معاينة المعلّم لطالب تبقى محلية.
+const boardOwner = () => mode === 'T' ? 'teacher' : (isTeacher() ? null : (sid || null));
+const boardKey = () => boardOwner()
+  ? 'manara.board.cloud.' + boardOwner()
+  : 'manara.board.' + (sid || 'guest');
+function boardPack(data) {
   return {
-    key,
+    owner: boardOwner(), key: boardKey(),
     strokes: Array.isArray(data?.strokes) ? data.strokes.slice(-400) : [],
     color: typeof data?.color === 'string' ? data.color : BOARD_COLORS[0],
-    width: +data?.width > 0 ? +data.width : 4,
+    width: +data?.width > 0 ? Math.min(28, Math.max(2, +data.width)) : 4,
     tool: data?.tool === 'erase' ? 'erase' : 'pen',
     grid: !!data?.grid,
     redo: []
   };
 }
 function boardSave() {
-  try {
-    localStorage.setItem(board.key, JSON.stringify({
-      strokes: board.strokes.slice(-400), color: board.color,
-      width: board.width, tool: board.tool, grid: board.grid
-    }));
-  } catch (e) {}
+  const data = {strokes: board.strokes.slice(-400), color: board.color,
+    width: board.width, tool: board.tool, grid: board.grid};
+  try { localStorage.setItem(board.key, JSON.stringify(data)); } catch (e) {}
+  const saveEl = $('#bsave');
+  if (board.owner && sb) {
+    const owner = board.owner;
+    if (saveEl) saveEl.textContent = 'جارٍ الحفظ…';
+    clearTimeout(boardSaveTimer);
+    boardSaveTimer = setTimeout(async () => {
+      const {error} = await sb.from('boards').upsert(
+        {...data, owner, updated_at: new Date().toISOString()}, {onConflict: 'owner'}
+      );
+      if (error) { console.error(error); if (saveEl && saveEl.isConnected) saveEl.textContent = 'تعذّر الحفظ السحابي — محفوظ محلياً'; }
+      else if (saveEl && saveEl.isConnected) saveEl.textContent = 'محفوظ في Supabase ✓';
+    }, 600);
+  } else if (saveEl) saveEl.textContent = 'محفوظ في هذا المتصفح';
 }
 function boardCtx() {
   const cv = $('#board');
@@ -579,9 +591,26 @@ function boardRedraw() {
   board.strokes.forEach(s => boardDrawStroke(c.ctx, s, c.w, c.h));
   boardStatus();
 }
-function boardView() {
-  const key = boardKey();
-  if (!board || board.key !== key) board = boardLoad(key);
+async function boardView() {
+  const token = ++boardLoadToken;
+  app.innerHTML = `<div class="card m">جارٍ تحميل السبورة…</div>`;
+  const owner = boardOwner(), key = boardKey();
+  let data = null;
+  if (owner && sb) {
+    const {data: row, error} = await sb.from('boards')
+      .select('strokes,color,width,tool,grid').eq('owner', owner).maybeSingle();
+    if (error) { console.error(error); toast('تعذّر تحميل السبورة من Supabase — سيُستخدم الحفظ المحلي'); }
+    else data = row || null;
+  }
+  if (!data) {
+    // localStorage يبقى نسخة احتياطية، ويُرفع إلى Supabase عند أول تعديل.
+    const legacy = [key, owner ? 'manara.board.' + owner : ''].filter(Boolean);
+    for (const k of legacy) {
+      try { const v = JSON.parse(localStorage.getItem(k) || 'null'); if (v) { data = v; break; } } catch (e) {}
+    }
+  }
+  if (token !== boardLoadToken || view.p !== 'board') return;
+  board = boardPack(data);
   board.drag = null;
   app.innerHTML = `<h1>السبورة الذكية</h1><div class="card">
     <div class="board-tools">
@@ -600,7 +629,7 @@ function boardView() {
       <button class="btn lamp" id="bc">🗑️ مسح</button>
     </div>
     <canvas id="board" class="${board.grid ? 'grid' : ''}" aria-label="لوحة الرسم"></canvas>
-    <div class="board-foot"><span class="m" id="bstat"></span><span class="m">ارسم بالفأرة أو اللمس · Ctrl+Z للتراجع · تُحفظ اللوحة تلقائياً في هذا المتصفح</span></div>
+    <div class="board-foot"><span class="m" id="bstat"></span><span class="m">ارسم بالفأرة أو اللمس · Ctrl+Z للتراجع</span><span class="m" id="bsave">${board.owner ? 'جاهز للحفظ في Supabase' : 'محفوظ في هذا المتصفح'}</span></div>
   </div>`;
   wireBoard();
   boardRedraw();
