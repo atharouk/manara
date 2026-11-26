@@ -167,6 +167,7 @@ curl -X POST 'https://syvsimvfftznetlzdnkz.supabase.co/functions/v1/weekly-repor
 - المجدول يقرأ السرّ من `public.weekly_report_config` ويُرسله في `x-manara-cron`، ويُطابق `REPORT_CRON_SECRET` في Secrets.
 - مفاتيح Resend و`REPORT_CRON_SECRET` تُحفظ في Supabase Secrets/قاعدة البيانات فقط، ولا تظهر في الواجهة أو في المستودع.
 - محتوى الرسالة: الإنجاز هذا الأسبوع، التلاوات المقبولة/بانتظار، الإعادات المطلوبة، وأسماء الدروس المُنجزة.
+- إلى أن تُضاف دومين مُتحقَّق، تتخطّى الدالة رسائل الطلاب تلقائياً وترسل ملخّص المعلّم فقط؛ بعد تغيير `REPORT_FROM_EMAIL` إلى بريد من الدومين المُتحقَّق تُفعّل رسائل الطلاب تلقائياً.
 
 ## 4) ما الذي تحوّل إلى سحابي؟
 

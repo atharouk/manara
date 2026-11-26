@@ -84,6 +84,9 @@ Deno.serve(async (req: Request) => {
     if (!apiKey) return json({error:'RESEND_API_KEY missing'}, 500);
     const from = Deno.env.get('REPORT_FROM_EMAIL') || 'onboarding@resend.dev';
     const appUrl = Deno.env.get('REPORT_APP_URL') || 'https://manara-atharok1.vercel.app';
+    // Resend يسمح بالإرسال من onboarding@resend.dev إلى بريد الحساب فقط.
+    // إلى أن يُضاف دومين مُتحقَّق، نُرسل للمعلّم ونتخطى رسائل الطلاب بدل إهدار المحاولات.
+    const sharedDomain = /@(?:onboarding|[a-z0-9-]+)\.resend\.dev$/i.test(from);
     const resend = new Resend(apiKey);
 
     const now = new Date();
@@ -164,17 +167,21 @@ Deno.serve(async (req: Request) => {
     for (const to of teacherEmails)
       await deliver(to, `منارة — التقرير الأسبوعي ${weekKey}`, teacherBody, true);
 
-    for (const r of rows) {
-      const email = roles.find(x => x.student_id === r.s.id)?.email;
-      if (!email) { skipped.push(`${r.s.name} (بلا بريد)`); continue; }
-      const body = `<div>أهلاً ${esc(r.s.name)}،</div>` + card(
-        stat(r.total, 'درس منجز') + stat(r.added, 'درس جديد هذا الأسبوع') +
-        stat(r.approved, 'تلاوة مقبولة') + stat(r.waiting, 'بانتظار المراجعة') +
-        stat(r.redo, 'تلاوة تحتاج إعادة')) +
-        `<h3>ما أُنجز هذا الأسبوع</h3>` + list(r.titles) +
-        `<h3>تلاوات تحتاج إعادة</h3>` + list(redos.filter(x => x.student_id === r.s.id).map(x =>
-          `${esc(LESSON_TITLES[x.lesson_id] || `سورة ${num(x.surah)} آية ${num(x.ayah)}`)}${x.teacher_note ? ` — ${esc(x.teacher_note)}` : ''}`));
-      await deliver(email, `منارة — تقدّمك الأسبوعي ${weekKey}`, shell('تقدّمك الأسبوعي', body, appUrl), true);
+    if (sharedDomain) {
+      skipped.push('رسائل الطلاب (يحتاج دوميناً مُتحقَّقاً في Resend)');
+    } else {
+      for (const r of rows) {
+        const email = roles.find(x => x.student_id === r.s.id)?.email;
+        if (!email) { skipped.push(`${r.s.name} (بلا بريد)`); continue; }
+        const body = `<div>أهلاً ${esc(r.s.name)}،</div>` + card(
+          stat(r.total, 'درس منجز') + stat(r.added, 'درس جديد هذا الأسبوع') +
+          stat(r.approved, 'تلاوة مقبولة') + stat(r.waiting, 'بانتظار المراجعة') +
+          stat(r.redo, 'تلاوة تحتاج إعادة')) +
+          `<h3>ما أُنجز هذا الأسبوع</h3>` + list(r.titles) +
+          `<h3>تلاوات تحتاج إعادة</h3>` + list(redos.filter(x => x.student_id === r.s.id).map(x =>
+            `${esc(LESSON_TITLES[x.lesson_id] || `سورة ${num(x.surah)} آية ${num(x.ayah)}`)}${x.teacher_note ? ` — ${esc(x.teacher_note)}` : ''}`));
+        await deliver(email, `منارة — تقدّمك الأسبوعي ${weekKey}`, shell('تقدّمك الأسبوعي', body, appUrl), true);
+      }
     }
     return json({mode:'weekly', weekKey, sent, skipped, failed});
   } catch (err) {
