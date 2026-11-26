@@ -404,12 +404,12 @@ function render() {
   $('#st').style.display = isTeacher() && mode === 'S' ? '' : 'none';
   $('#st').innerHTML = students.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${E(s.n)}</option>`).join('');
   side();
-  ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, recitations: trec, quran, sec: ssec, lesson})[view.p]();
+  ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, recitations: trec, quran, board: boardView, sec: ssec, lesson})[view.p]();
 }
 function side() {
   const it = mode === 'T'
-    ? [['home', '🏠', 'الرئيسية'], ['students', '👥', 'الطلاب'], ['cur', '📚', 'المنهج'], ['tasks', '✅', 'المهام'], ['reports', '📊', 'التقارير'], ['recitations', '🎙️', 'التلاوات'], ['quran', '📖', 'القرآن']]
-    : [['home', '🏠', 'الرئيسية'], ['quran', '📖', 'القرآن'], ...SECS.map(s => ['sec:' + s.id, s.icon, s.t])];
+    ? [['home', '🏠', 'الرئيسية'], ['students', '👥', 'الطلاب'], ['cur', '📚', 'المنهج'], ['tasks', '✅', 'المهام'], ['reports', '📊', 'التقارير'], ['recitations', '🎙️', 'التلاوات'], ['quran', '📖', 'القرآن'], ['board', '🖊️', 'السبورة']]
+    : [['home', '🏠', 'الرئيسية'], ['quran', '📖', 'القرآن'], ['board', '🖊️', 'السبورة'], ...SECS.map(s => ['sec:' + s.id, s.icon, s.t])];
   const cur = view.p === 'sec' ? 'sec:' + view.sec : view.p;
   const near = nearTasks(mode === 'T' ? null : sid).length;
   const late = lateRecitations(mode === 'T' ? null : sid).length;
@@ -456,6 +456,191 @@ themeBtn.onclick = () => {
 matchMedia('(prefers-color-scheme:dark)').addEventListener?.('change', () => {
   if (!localStorage.getItem('manara.theme')) applyTheme();
 });
+
+/* ---------- Smart board ---------- */
+const BOARD_COLORS = ['#12292e', '#b4442f', '#1c8a86', '#17745a', '#d97706', '#7c3aed', '#2563eb', '#ffffff'];
+let board = null;
+const boardKey = () => 'manara.board.' + (mode === 'T' ? 'teacher' : (sid || 'guest'));
+function boardLoad(key) {
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
+  return {
+    key,
+    strokes: Array.isArray(data?.strokes) ? data.strokes.slice(-400) : [],
+    color: typeof data?.color === 'string' ? data.color : BOARD_COLORS[0],
+    width: +data?.width > 0 ? +data.width : 4,
+    tool: data?.tool === 'erase' ? 'erase' : 'pen',
+    grid: !!data?.grid,
+    redo: []
+  };
+}
+function boardSave() {
+  try {
+    localStorage.setItem(board.key, JSON.stringify({
+      strokes: board.strokes.slice(-400), color: board.color,
+      width: board.width, tool: board.tool, grid: board.grid
+    }));
+  } catch (e) {}
+}
+function boardCtx() {
+  const cv = $('#board');
+  if (!cv) return null;
+  const r = cv.getBoundingClientRect(), dpr = Math.max(1, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return {ctx, w: r.width, h: r.height};
+}
+function boardDot(ctx, x, y, radius, color, erase) {
+  ctx.save();
+  ctx.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+  ctx.fillStyle = erase ? '#000' : color;
+  ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+function boardSegment(ctx, a, b, w, h, s) {
+  ctx.save();
+  ctx.globalCompositeOperation = s.t === 'erase' ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = s.t === 'erase' ? '#000' : s.c;
+  ctx.lineWidth = s.w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(a[0] * w, a[1] * h); ctx.lineTo(b[0] * w, b[1] * h); ctx.stroke();
+  ctx.restore();
+}
+function boardDrawStroke(ctx, s, w, h) {
+  if (!s.p?.length) return;
+  if (s.p.length === 1) { boardDot(ctx, s.p[0][0] * w, s.p[0][1] * h, s.w / 2, s.c, s.t === 'erase'); return; }
+  ctx.save();
+  ctx.globalCompositeOperation = s.t === 'erase' ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = s.t === 'erase' ? '#000' : s.c;
+  ctx.lineWidth = s.w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  s.p.forEach((p, i) => i ? ctx.lineTo(p[0] * w, p[1] * h) : ctx.moveTo(p[0] * w, p[1] * h));
+  ctx.stroke(); ctx.restore();
+}
+function boardStatus() {
+  const el = $('#bstat');
+  if (el) el.textContent = `${N(board.strokes.length)} ضغطة · ${board.tool === 'erase' ? 'ممحاة' : 'فرشاة'}`;
+}
+function boardRedraw() {
+  const c = boardCtx();
+  if (!c) return;
+  c.ctx.clearRect(0, 0, c.w, c.h);
+  board.strokes.forEach(s => boardDrawStroke(c.ctx, s, c.w, c.h));
+  boardStatus();
+}
+function boardView() {
+  const key = boardKey();
+  if (!board || board.key !== key) board = boardLoad(key);
+  board.drag = null;
+  app.innerHTML = `<h1>السبورة الذكية</h1><div class="card">
+    <div class="board-tools">
+      <div class="swatches">${BOARD_COLORS.map(c => `<button class="sw ${c === board.color ? 'on' : ''}" style="background:${c}" data-c="${c}" aria-label="اختر اللون" title="${c}"></button>`).join('')}</div>
+      <div class="sep"></div>
+      <button class="btn alt tool-btn ${board.tool === 'pen' ? 'on' : ''}" id="bp">🖊️ فرشاة</button>
+      <button class="btn alt tool-btn ${board.tool === 'erase' ? 'on' : ''}" id="be">🧽 ممحاة</button>
+      <div class="sep"></div>
+      <label for="bw" style="margin:0">السمك <b id="bwv">${board.width}</b></label>
+      <input id="bw" type="range" min="2" max="28" value="${board.width}" style="width:120px" aria-label="سمك الفرشاة">
+      <div class="sep"></div>
+      <button class="btn alt tool-btn ${board.grid ? 'on' : ''}" id="bg" title="شبكة تساعد على التناسق">▦ شبكة</button>
+      <button class="btn alt" id="bu" title="تراجع Ctrl+Z">↶ تراجع</button>
+      <button class="btn alt" id="br" title="إعادة Ctrl+Y">↷ إعادة</button>
+      <button class="btn alt" id="bpng" title="تنزيل اللوحة صورة">⬇️ صورة</button>
+      <button class="btn lamp" id="bc">🗑️ مسح</button>
+    </div>
+    <canvas id="board" class="${board.grid ? 'grid' : ''}" aria-label="لوحة الرسم"></canvas>
+    <div class="board-foot"><span class="m" id="bstat"></span><span class="m">ارسم بالفأرة أو اللمس · Ctrl+Z للتراجع · تُحفظ اللوحة تلقائياً في هذا المتصفح</span></div>
+  </div>`;
+  wireBoard();
+  boardRedraw();
+}
+function wireBoard() {
+  const cv = $('#board');
+  const point = e => {
+    const r = cv.getBoundingClientRect();
+    const clamp = v => Math.min(1, Math.max(0, v));
+    return [clamp((e.clientX - r.left) / r.width), clamp((e.clientY - r.top) / r.height)];
+  };
+  cv.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+    const p = point(e), width = board.tool === 'erase' ? board.width * 3 : board.width;
+    board.drag = {id: e.pointerId, stroke: {c: board.color, w: width, t: board.tool, p: [p]}};
+    const c = boardCtx();
+    boardDot(c.ctx, p[0] * c.w, p[1] * c.h, width / 2, board.color, board.tool === 'erase');
+  });
+  cv.addEventListener('pointermove', e => {
+    const d = board.drag;
+    if (!d || d.id !== e.pointerId) return;
+    e.preventDefault();
+    const p = point(e), last = d.stroke.p[d.stroke.p.length - 1];
+    if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 0.001) return;
+    d.stroke.p.push(p);
+    const c = boardCtx();
+    boardSegment(c.ctx, last, p, c.w, c.h, d.stroke);
+  });
+  const end = e => {
+    const d = board.drag;
+    if (!d || d.id !== e.pointerId) return;
+    board.drag = null;
+    board.strokes.push(d.stroke);
+    if (board.strokes.length > 400) board.strokes.shift();
+    board.redo = [];
+    boardSave(); boardRedraw();
+  };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+  const setTool = t => {
+    board.tool = t;
+    $('#bp').classList.toggle('on', t === 'pen');
+    $('#be').classList.toggle('on', t === 'erase');
+    boardSave(); boardStatus();
+  };
+  $('#bp').onclick = () => setTool('pen');
+  $('#be').onclick = () => setTool('erase');
+  app.querySelectorAll('.sw').forEach(b => b.onclick = () => {
+    board.color = b.dataset.c;
+    app.querySelectorAll('.sw').forEach(x => x.classList.toggle('on', x === b));
+    setTool('pen');
+  });
+  $('#bw').oninput = e => { board.width = +e.target.value; $('#bwv').textContent = board.width; boardSave(); };
+  $('#bg').onclick = () => {
+    board.grid = !board.grid;
+    cv.classList.toggle('grid', board.grid);
+    $('#bg').classList.toggle('on', board.grid);
+    boardSave();
+  };
+  $('#bu').onclick = () => { if (!board.strokes.length) return; board.redo.push(board.strokes.pop()); boardSave(); boardRedraw(); };
+  $('#br').onclick = () => { if (!board.redo.length) return; board.strokes.push(board.redo.pop()); boardSave(); boardRedraw(); };
+  $('#bc').onclick = () => {
+    if (!board.strokes.length || !confirm('مسح كل ما رسمته على السبورة؟')) return;
+    board.redo = board.strokes.splice(0); boardSave(); boardRedraw(); toast('تم مسح السبورة');
+  };
+  $('#bpng').onclick = () => {
+    const out = document.createElement('canvas');
+    out.width = cv.width; out.height = cv.height;
+    const c = out.getContext('2d');
+    c.fillStyle = '#fff'; c.fillRect(0, 0, out.width, out.height);
+    if (board.grid) {
+      const r = cv.getBoundingClientRect(), step = 24 * (out.width / Math.max(1, r.width));
+      c.fillStyle = '#cbd8d6';
+      for (let x = 0; x < out.width; x += step) for (let y = 0; y < out.height; y += step) {
+        c.beginPath(); c.arc(x, y, Math.max(1, step / 24), 0, Math.PI * 2); c.fill();
+      }
+    }
+    c.drawImage(cv, 0, 0);
+    const a = document.createElement('a');
+    a.download = 'سبورة-منارة.png'; a.href = out.toDataURL('image/png'); a.click();
+  };
+}
+addEventListener('keydown', e => {
+  if (view.p !== 'board' || !board || /INPUT|TEXTAREA/.test(document.activeElement?.tagName || '')) return;
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); (e.shiftKey ? $('#br') : $('#bu'))?.click(); }
+  if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); $('#br')?.click(); }
+});
+addEventListener('resize', () => { if (view.p === 'board') boardRedraw(); });
 
 /* ---------- Teacher views ---------- */
 function thome() {
