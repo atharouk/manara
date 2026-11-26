@@ -226,6 +226,52 @@ function toast(t) {
   toast.t = setTimeout(() => e.classList.remove('show'), 2600);
 }
 
+/* ---------- Celebrations ---------- */
+const CHEERS = {
+  star: {icon: '⭐', emojis: ['⭐', '✨', '🌟', '💫'], title: 'نجمة جديدة!', sub: 'عمل رائع، واصل التألق ✨'},
+  party: {icon: '🎉', emojis: ['🎉', '🎊', '🎈', '🍬', '🌈'], title: 'أحسنت!', sub: 'احتفل بتقدّمك 🎉'},
+  lantern: {icon: '🏮', emojis: ['🏮', '⭐', '✨', '🕯️'], title: 'أنهيت الدرس!', sub: 'أُضيف فانوس لسجل إنجازك 🏮'}
+};
+const RIBBON_COLORS = ['#f2b134', '#1c8a86', '#b4442f', '#7c3aed', '#2563eb', '#17745a'];
+let celebrateTimer = null;
+function celebrate(kind = 'party', title, sub) {
+  const host = $('#celebrate');
+  if (!host) return;
+  const c = CHEERS[kind] || CHEERS.party;
+  host.innerHTML = `<div class="msg"><b>${c.icon} ${E(title || c.title)}</b>${(sub || c.sub) ? `<span class="m">${E(sub || c.sub)}</span>` : ''}</div>`;
+  for (let i = 0; i < 26; i++) {
+    const p = document.createElement(i % 4 === 0 ? 'i' : 'span');
+    if (i % 4 === 0) { p.className = 'rb'; p.style.background = RIBBON_COLORS[i % RIBBON_COLORS.length]; }
+    else { p.className = 'pt'; p.textContent = c.emojis[Math.floor(Math.random() * c.emojis.length)]; }
+    p.style.left = (Math.random() * 100) + '%';
+    p.style.animationDelay = (Math.random() * 0.7) + 's';
+    p.style.animationDuration = (1.6 + Math.random() * 1.3) + 's';
+    p.style.setProperty('--dx', Math.round(Math.random() * 160 - 80) + 'px');
+    p.style.setProperty('--rot', Math.round(Math.random() * 900 - 450) + 'deg');
+    host.appendChild(p);
+  }
+  clearTimeout(celebrateTimer);
+  celebrateTimer = setTimeout(() => { host.innerHTML = ''; }, 2700);
+}
+function sparkleAt(el) {
+  const host = $('#celebrate');
+  if (!host || !el) return;
+  const r = el.getBoundingClientRect();
+  for (let i = 0; i < 9; i++) {
+    const s = document.createElement('span');
+    s.className = 'spark';
+    s.textContent = ['✨', '⭐', '💫'][i % 3];
+    s.style.left = (r.left + r.width / 2) + 'px';
+    s.style.top = (r.top + r.height / 2) + 'px';
+    s.style.setProperty('--bx', Math.round(Math.random() * 120 - 60) + 'px');
+    s.style.setProperty('--by', Math.round(Math.random() * 120 - 60) + 'px');
+    s.style.animationDelay = (Math.random() * 0.12) + 's';
+    host.appendChild(s);
+  }
+  clearTimeout(sparkleAt.t);
+  sparkleAt.t = setTimeout(() => host.querySelectorAll('.spark').forEach(x => x.remove()), 950);
+}
+
 /* ---------- Supabase layer ---------- */
 async function loadData() {
   const [{data: st, error: e1}, {data: cp, error: e2}, {data: as, error: e3}, {data: ro, error: e4}, {data: rc, error: e5}] = await Promise.all([
@@ -403,6 +449,7 @@ function render() {
   $('#bS').classList.toggle('on', mode === 'S');
   $('#st').style.display = isTeacher() && mode === 'S' ? '' : 'none';
   $('#st').innerHTML = students.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${E(s.n)}</option>`).join('');
+  $('#cheer').classList.toggle('on', view.p === 'lesson' && !isTeacher());
   side();
   ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, recitations: trec, quran, board: boardView, sec: ssec, lesson})[view.p]();
 }
@@ -456,6 +503,9 @@ themeBtn.onclick = () => {
 matchMedia('(prefers-color-scheme:dark)').addEventListener?.('change', () => {
   if (!localStorage.getItem('manara.theme')) applyTheme();
 });
+$('#ch-star').onclick = () => celebrate('star');
+$('#ch-party').onclick = () => celebrate('party');
+$('#ch-lantern').onclick = () => celebrate('lantern');
 
 /* ---------- Smart board ---------- */
 const BOARD_COLORS = ['#12292e', '#b4442f', '#1c8a86', '#17745a', '#d97706', '#7c3aed', '#2563eb', '#ffffff'];
@@ -1014,7 +1064,7 @@ function quiz(items, fin) {
       b.onclick = () => {
         ob.querySelectorAll('.opt').forEach((x, j) => { x.disabled = true; if (j === q.a) { x.classList.add('ok'); x.textContent = '✓ ' + x.textContent; } });
         const ok = k === q.a;
-        if (ok) sc++; else { b.classList.add('no'); b.textContent = '✗ ' + b.textContent; }
+        if (ok) { sc++; sparkleAt(b); } else { b.classList.add('no'); b.textContent = '✗ ' + b.textContent; }
         c.lastChild.innerHTML = `<div class="fb"><b>${ok ? 'أحسنت!' : 'لا بأس، لنتعلّم معاً.'}</b> ${E(q.whys ? q.whys[k] : (q.why || ''))}</div>`;
         if (++n === items.length) fin(sc);
       };
@@ -1059,7 +1109,10 @@ function lesson() {
   app.innerHTML = `<div class="top row"><button class="btn alt" id="bk">رجوع</button><div class="grow m">${prev ? 'معاينة المعلم: لا تُسجَّل النتائج' : ''}</div></div><h1>${E(it.t)}</h1>` + b + (it.kind === 'adab' ? `<h2>الدليل</h2>` + it.qr.map(q => `<div class="card"><div class="m">${E(q.loc)}</div><div class="ex ar">${E(q.text)}</div></div>`).join('') + `<div class="card"><b>أحفظ:</b> ${E(it.mem)}<br><b>أطبّق هذا الأسبوع:</b> ${E(it.week)}</div>` : '') + `<div id="qz"></div><div id="fin"></div>` + (prev && it.tn ? `<div class="fb"><b>ملاحظة للمعلم:</b> ${E(it.tn)}</div>` : '');
   $('#bk').onclick = () => go(view.back || {p: 'home'});
   const fin = () => {
-    if (!prev && sid && !done[sid].has(it.id)) { done[sid].add(it.id); toast('أحسنت! أُضيف فانوس 🏮'); persistCompletion(it.id); }
+    if (!prev && sid && !done[sid].has(it.id)) {
+      done[sid].add(it.id); toast('أحسنت! أُضيف فانوس 🏮'); persistCompletion(it.id);
+      celebrate('lantern', 'أنهيت الدرس!', 'أُضيف فانوس جديد لسجل إنجازك 🏮');
+    } else if (!prev) celebrate('party', 'راجعت الدرس 👏', 'كل مراجعة تزيد إتقانك');
     $('#fin').innerHTML = `<div class="fb"><b>${prev ? 'انتهت المعاينة.' : 'أنهيتَ الدرس 🏮'}</b></div>`;
   };
   if (it.kind === 'adab') $('#ad').remove();
@@ -1200,6 +1253,7 @@ function quizDlg(id) {
       quiz_total: qs.length, quiz_passed: lessons.length > 0, quiz_at: new Date().toISOString()});
     lessons.forEach(l => done[r.student_id]?.add(l));
     toast(lessons.length ? `أُضيف ${N(lessons.length)} درس لإنجازك 🏮` : 'لم تُصب أي إجابة. يمكنك إعادة الاختبار.');
+    if (lessons.length) celebrate('star', 'نجحت في الاختبار!', `أُضيف ${N(lessons.length)} درس لإنجازك 🏮`);
     if (lessons.length) {
       submit.disabled = false;
       submit.textContent = 'إغلاق';

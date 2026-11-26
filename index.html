@@ -91,6 +91,21 @@ th,td{padding:9px 8px;text-align:start;border-bottom:1px solid var(--line);font-
 .ay-row{display:flex;gap:8px;align-items:flex-start;margin-bottom:2px}.ay-row .ay{flex:1}
 .basm-row{justify-content:center;margin-bottom:8px}
 .btn.mini{padding:2px 9px;min-width:34px;border-radius:999px;font-size:.8rem;line-height:1.6}.btn.mini.on{background:var(--lamp);color:#2b1d00;border-color:var(--lamp)}
+#celebrate{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:60}
+#celebrate .msg{position:absolute;top:16%;inset-inline:0;margin:auto;width:max-content;max-width:88vw;background:var(--card);border:2px solid var(--lamp);border-radius:18px;padding:12px 22px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:popin .45s ease-out,msgout .4s ease-in 2s forwards}
+#celebrate .msg b{display:block;font-size:1.25rem;line-height:1.6}
+#celebrate .pt{position:absolute;top:-14vh;font-size:1.35rem;will-change:transform;animation:fall linear forwards}
+#celebrate .rb{display:block;width:8px;height:18px;border-radius:3px;will-change:transform;animation:fall linear forwards}
+#celebrate .spark{position:absolute;font-size:1.1rem;animation:burst .75s ease-out forwards}
+@keyframes fall{to{transform:translate3d(var(--dx,0px),118vh,0) rotate(var(--rot,360deg));opacity:.9}}
+@keyframes popin{from{transform:scale(.6) translateY(20px);opacity:0}to{transform:scale(1) translateY(0);opacity:1}}
+@keyframes msgout{to{opacity:0;transform:translateY(-14px)}}
+@keyframes burst{to{transform:translate(var(--bx,0px),var(--by,-60px)) scale(.3) rotate(180deg);opacity:0}}
+@media (prefers-reduced-motion:reduce){#celebrate .pt,#celebrate .rb,#celebrate .spark,#celebrate .msg{animation-duration:.01ms!important}}
+#cheer{position:fixed;inset-inline-start:14px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:none;gap:8px;z-index:40}
+#cheer.on{display:flex}
+#cheer button{width:46px;height:46px;border-radius:50%;border:1px solid rgba(255,255,255,.45);background:var(--deep);color:#fff;font-size:1.15rem;line-height:1;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+#cheer button:nth-child(2){background:var(--lag)}#cheer button:nth-child(3){background:var(--lamp);color:#2b1d00}
 .board-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
 .board-tools .sep{width:1px;align-self:stretch;background:var(--line);margin:0 2px}
 .swatches{display:flex;gap:6px;flex-wrap:wrap}
@@ -128,6 +143,8 @@ label{display:block;margin:10px 0 4px;color:var(--mute);font-size:.9rem}select,i
 <div class="demo">نسخة تجريبية سحابية: التبديل بين العرضين للمعاينة فقط، والتقدّم يُحفظ في Supabase. كل المحتوى مسودات تحتاج مراجعة مختص.</div>
 <div class="shell"><aside id="side" aria-label="القائمة"></aside><main id="app"></main></div>
 <dialog id="dlg"></dialog><div id="toast" role="status"></div>
+<div id="celebrate" aria-hidden="true"></div>
+<div id="cheer" aria-label="أزرار التشجيع"><button id="ch-star" title="نجمة تشجيعية" aria-label="نجمة تشجيعية">⭐</button><button id="ch-party" title="احتفال ملوّن" aria-label="احتفال ملوّن">🎉</button><button id="ch-lantern" title="فانوس إنجاز" aria-label="فانوس إنجاز">🏮</button></div>
 <div id="auth" class="auth" hidden>
   <div class="card authcard">
     <h1>منارة</h1>
