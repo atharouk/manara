@@ -408,20 +408,20 @@ function render() {
 }
 function side() {
   const it = mode === 'T'
-    ? [['home', 'الرئيسية'], ['students', 'الطلاب'], ['cur', 'المنهج'], ['tasks', 'المهام'], ['reports', 'التقارير'], ['recitations', 'التلاوات'], ['quran', 'القرآن']]
-    : [['home', 'الرئيسية'], ['quran', 'القرآن'], ...SECS.map(s => ['sec:' + s.id, s.icon + ' ' + s.t])];
+    ? [['home', '🏠', 'الرئيسية'], ['students', '👥', 'الطلاب'], ['cur', '📚', 'المنهج'], ['tasks', '✅', 'المهام'], ['reports', '📊', 'التقارير'], ['recitations', '🎙️', 'التلاوات'], ['quran', '📖', 'القرآن']]
+    : [['home', '🏠', 'الرئيسية'], ['quran', '📖', 'القرآن'], ...SECS.map(s => ['sec:' + s.id, s.icon, s.t])];
   const cur = view.p === 'sec' ? 'sec:' + view.sec : view.p;
   const near = nearTasks(mode === 'T' ? null : sid).length;
   const late = lateRecitations(mode === 'T' ? null : sid).length;
   const redo = redoRequests(mode === 'T' ? null : sid).length;
-  $('#side').innerHTML = `<div class="nv">` + it.map(([k, t]) => {
+  $('#side').innerHTML = `<div class="nv">` + it.map(([k, ic, t]) => {
     let bell = '';
-    if (near && (k === 'home' || k === 'tasks')) bell += ` <span class="nav-bell">🔔 ${N(near)}</span>`;
+    if (near && (k === 'home' || k === 'tasks')) bell += ` <span class="nav-bell"><span class="ic">🔔</span>${N(near)}</span>`;
     if (late && (k === 'home' || k === 'tasks' || (mode === 'S' && k === 'quran')))
-      bell += ` <span class="nav-bell late">⏰ ${N(late)}</span>`;
+      bell += ` <span class="nav-bell late"><span class="ic">⏰</span>${N(late)}</span>`;
     if (redo && (k === 'home' || (mode === 'T' ? k === 'recitations' : (!isTeacher() && k === 'quran'))))
-      bell += ` <span class="nav-bell retry">🔁 ${N(redo)}</span>`;
-    return `<button data-k="${k}" class="${cur === k ? 'on' : ''}">${t}${bell}</button>`;
+      bell += ` <span class="nav-bell retry"><span class="ic">🔁</span>${N(redo)}</span>`;
+    return `<button data-k="${k}" class="${cur === k ? 'on' : ''}"><span><span class="nav-ic">${ic}</span>${t}</span>${bell}</button>`;
   }).join('') + `</div>`;
   $('#side').querySelectorAll('button').forEach(b => b.onclick = () => {
     const k = b.dataset.k;
@@ -432,6 +432,31 @@ $('#bT').onclick = () => { mode = 'T'; go({p: 'home'}); };
 $('#bS').onclick = () => { mode = 'S'; go({p: 'home'}); };
 $('#st').onchange = e => { sid = e.target.value; go({p: 'home'}); };
 
+/* ---------- Theme (light / dark) ---------- */
+const themeBtn = $('#theme');
+const systemDark = () => matchMedia('(prefers-color-scheme:dark)').matches;
+function isDark() {
+  const t = document.documentElement.dataset.theme;
+  return t ? t === 'dark' : systemDark();
+}
+function applyTheme() {
+  const saved = localStorage.getItem('manara.theme');
+  if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
+  const dark = isDark();
+  themeBtn.textContent = dark ? '☀️' : '🌙';
+  themeBtn.setAttribute('aria-label', dark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع الليلي');
+  const meta = $('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', dark ? '#07262c' : '#0e3b43');
+}
+applyTheme();
+themeBtn.onclick = () => {
+  localStorage.setItem('manara.theme', isDark() ? 'light' : 'dark');
+  applyTheme();
+};
+matchMedia('(prefers-color-scheme:dark)').addEventListener?.('change', () => {
+  if (!localStorage.getItem('manara.theme')) applyTheme();
+});
+
 /* ---------- Teacher views ---------- */
 function thome() {
   const rd = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم');
@@ -439,7 +464,13 @@ function thome() {
   const soon = nearTasks(), late = lateRecitations(), redo = redoRequests();
   const tot = assigns.reduce((a, x) => a + tgt(x).length, 0),
         dn = assigns.reduce((a, x) => a + tgt(x).filter(s => done[s.id].has(x.id)).length, 0);
-  app.innerHTML = `<h1>أهلاً بك يا معلم</h1><div class="stats"><div class="card stat"><b>${N(students.length)}</b><span>طالب</span></div><div class="card stat"><b>${N(assigns.length)}</b><span>مهمة مُسندة</span></div><div class="card stat"><b>${N(dn)} / ${N(tot)}</b><span>تسليمات أُنجزت</span></div><div class="card stat"><b>${N(rd.length)}</b><span>جاهزون للترقية</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div><div class="card stat"><b>${N(redo.length)}</b><span>إعادات مطلوبة</span></div></div>` +
+  app.innerHTML = `<h1>أهلاً بك يا معلم</h1><div class="stats">
+    <div class="card stat"><i class="si">👥</i><b>${N(students.length)}</b><span>طالب</span></div>
+    <div class="card stat"><i class="si">📌</i><b>${N(assigns.length)}</b><span>مهمة مُسندة</span></div>
+    <div class="card stat c-good"><i class="si">✅</i><b>${N(dn)} / ${N(tot)}</b><span>تسليمات أُنجزت</span></div>
+    <div class="card stat c-warn"><i class="si">⬆️</i><b>${N(rd.length)}</b><span>جاهزون للترقية</span></div>
+    <div class="card stat c-warn"><i class="si">🎙️</i><b>${N(pending)}</b><span>تلاوات بانتظار</span></div>
+    <div class="card stat c-bad"><i class="si">🔁</i><b>${N(redo.length)}</b><span>إعادات مطلوبة</span></div></div>` +
     (pending ? `<div class="card" style="border:2px solid var(--lamp)"><b>${N(pending)} تلاوة بانتظار المراجعة</b><p class="m" style="margin:4px 0 8px">استمع إليها واعتمدها أو اطلب إعادة التسجيل.</p><button class="btn lamp" id="gr">فتح التلاوات</button></div>` : '') +
     notifyPanel(soon, 'teacher') +
     lateRecPanel(late) +
@@ -751,6 +782,11 @@ function shome() {
   const quizRecs = myRec.filter(r => r.status === 'approved' && (!r.quiz_at || !r.quiz_passed));
   const quizDone = myRec.filter(r => r.status === 'approved' && r.quiz_passed);
   app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
+  <div class="stats">
+    <div class="card stat c-good"><i class="si">📚</i><b>${N(n)}</b><span>دروس منجزة</span></div>
+    <div class="card stat c-good"><i class="si">✅</i><b>${N(recOk)}</b><span>تلاوات مقبولة</span></div>
+    <div class="card stat c-warn"><i class="si">⏳</i><b>${N(recWait)}</b><span>بانتظار المراجعة</span></div>
+    <div class="card stat c-bad"><i class="si">🔁</i><b>${N(recRev)}</b><span>تحتاج إعادة</span></div></div>
   ${notifyPanel(soon, 'student')}
   ${lateRecPanel(lateRecitations(s.id), 'student')}
   ${redoPanel(redoRequests(s.id), 'student')}
