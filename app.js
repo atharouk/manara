@@ -575,6 +575,30 @@ $('#ch-mute').onclick = () => {
 /* ---------- Smart board ---------- */
 const BOARD_COLORS = ['#12292e', '#b4442f', '#1c8a86', '#17745a', '#d97706', '#7c3aed', '#2563eb', '#ffffff'];
 let board = null, boardLoadToken = 0, boardSaveTimer = null;
+const boardIsFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement ||
+  document.querySelector('#boardShell')?.classList.contains('board-fs'));
+function syncFullBtn() {
+  const b = $('#bfull');
+  if (!b) return;
+  const on = boardIsFull();
+  b.textContent = on ? '⤢ خروج من ملء الشاشة' : '⛶ ملء الشاشة';
+  b.title = on ? 'الخروج من ملء الشاشة' : 'ملء الشاشة';
+  b.classList.toggle('on', on);
+}
+function setFakeFull(on) {
+  const shell = $('#boardShell');
+  if (!shell) return;
+  shell.classList.toggle('board-fs', on);
+  document.body.classList.toggle('board-fs-open', on);
+  syncFullBtn();
+  if ($('#board')) boardRedraw();
+}
+const onFullChange = () => { syncFullBtn(); if ($('#board')) boardRedraw(); };
+document.addEventListener('fullscreenchange', onFullChange);
+document.addEventListener('webkitfullscreenchange', onFullChange);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('#boardShell')?.classList.contains('board-fs')) setFakeFull(false);
+});
 // المعلّم لوحته الخاصة 'teacher'، والطالب لوحته بمعرّفه. معاينة المعلّم لطالب تبقى محلية.
 const boardOwner = () => mode === 'T' ? 'teacher' : (isTeacher() ? null : (sid || null));
 const boardKey = () => boardOwner()
@@ -677,30 +701,49 @@ async function boardView() {
   if (token !== boardLoadToken || view.p !== 'board') return;
   board = boardPack(data);
   board.drag = null;
-  app.innerHTML = `<h1>السبورة الذكية</h1><div class="card">
-    <div class="board-tools">
+  app.innerHTML = `<h1>السبورة الذكية</h1><div class="board-shell" id="boardShell">
+    <div class="board-tools" role="toolbar" aria-label="أدوات السبورة">
+      <b class="board-tools-title">🖊️ الأدوات</b>
       <div class="swatches">${BOARD_COLORS.map(c => `<button class="sw ${c === board.color ? 'on' : ''}" style="background:${c}" data-c="${c}" aria-label="اختر اللون" title="${c}"></button>`).join('')}</div>
       <div class="sep"></div>
       <button class="btn alt tool-btn ${board.tool === 'pen' ? 'on' : ''}" id="bp">🖊️ فرشاة</button>
       <button class="btn alt tool-btn ${board.tool === 'erase' ? 'on' : ''}" id="be">🧽 ممحاة</button>
       <div class="sep"></div>
-      <label for="bw" style="margin:0">السمك <b id="bwv">${board.width}</b></label>
-      <input id="bw" type="range" min="2" max="28" value="${board.width}" style="width:120px" aria-label="سمك الفرشاة">
+      <label for="bw">السمك <b id="bwv">${board.width}</b></label>
+      <input id="bw" type="range" min="2" max="28" value="${board.width}" aria-label="سمك الفرشاة">
       <div class="sep"></div>
       <button class="btn alt tool-btn ${board.grid ? 'on' : ''}" id="bg" title="شبكة تساعد على التناسق">▦ شبكة</button>
       <button class="btn alt" id="bu" title="تراجع Ctrl+Z">↶ تراجع</button>
       <button class="btn alt" id="br" title="إعادة Ctrl+Y">↷ إعادة</button>
       <button class="btn alt" id="bpng" title="تنزيل اللوحة صورة">⬇️ صورة</button>
+      <button class="btn" id="bfull" title="ملء الشاشة">⛶ ملء الشاشة</button>
       <button class="btn lamp" id="bc">🗑️ مسح</button>
     </div>
-    <canvas id="board" class="${board.grid ? 'grid' : ''}" aria-label="لوحة الرسم"></canvas>
-    <div class="board-foot"><span class="m" id="bstat"></span><span class="m">ارسم بالفأرة أو اللمس · Ctrl+Z للتراجع</span><span class="m" id="bsave">${board.owner ? 'جاهز للحفظ في Supabase' : 'محفوظ في هذا المتصفح'}</span></div>
+    <div class="card board-canvas">
+      <canvas id="board" class="${board.grid ? 'grid' : ''}" aria-label="لوحة الرسم"></canvas>
+      <div class="board-foot"><span class="m" id="bstat"></span><span class="m">ارسم بالفأرة أو اللمس · Ctrl+Z للتراجع</span><span class="m" id="bsave">${board.owner ? 'جاهز للحفظ في Supabase' : 'محفوظ في هذا المتصفح'}</span></div>
+    </div>
   </div>`;
   wireBoard();
   boardRedraw();
 }
 function wireBoard() {
   const cv = $('#board');
+  const shell = $('#boardShell');
+  if ($('#bfull') && shell) $('#bfull').onclick = async () => {
+    if (boardIsFull()) {
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        try { await (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {}
+      }
+      setFakeFull(false);
+      return;
+    }
+    const req = shell.requestFullscreen || shell.webkitRequestFullscreen;
+    if (!req) { setFakeFull(true); return; }
+    try { await req.call(shell); }
+    catch (e) { setFakeFull(true); } // وضع بديل ملء الشاشة إن منع المتصفح Fullscreen API
+  };
+  syncFullBtn();
   const point = e => {
     const r = cv.getBoundingClientRect();
     const clamp = v => Math.min(1, Math.max(0, v));
