@@ -20,7 +20,11 @@ button,select,input{font:inherit;color:inherit}button{cursor:pointer}
 .ar{font-family:"Amiri Quran","Noto Naskh Arabic",serif}
 header{background:var(--deep);color:var(--on);padding:12px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .brand{font-weight:700;font-size:1.3rem;display:flex;align-items:center;gap:10px;margin-inline-end:auto}
-.lamp{width:14px;height:14px;border-radius:50%;background:var(--lamp);box-shadow:0 0 14px 3px rgba(242,177,52,.55)}
+.logo{display:inline-flex;align-items:center;gap:10px}
+.logo-mark{position:relative;width:42px;height:42px;flex:0 0 auto;display:grid;place-items:center;background:linear-gradient(145deg,#f8d98a,var(--lamp) 55%,#c98a16);clip-path:polygon(50% 0,86% 14%,100% 50%,86% 86%,50% 100%,14% 86%,0 50%,14% 14%);filter:drop-shadow(0 0 8px rgba(242,177,52,.45))}
+.logo-mark::before{content:"";position:absolute;inset:4px;background:var(--deep);clip-path:polygon(50% 0,86% 14%,100% 50%,86% 86%,50% 100%,14% 86%,0 50%,14% 14%)}
+.logo-mark i{position:relative;color:var(--lamp);font-style:normal;font-size:1.05rem;line-height:1;text-shadow:0 0 8px rgba(242,177,52,.75)}
+.logo-word{font-family:"Amiri Quran","Noto Naskh Arabic",serif;font-size:1.7rem;font-weight:600;line-height:1.2;color:var(--on)}
 .chip{border:1px solid rgba(234,246,244,.35);background:transparent;color:inherit;border-radius:999px;padding:6px 14px;font-size:.9rem}
 .chip.on{background:var(--lamp);color:#2b1d00;border-color:var(--lamp);font-weight:600}
 header select{background:var(--deep);border:1px solid rgba(234,246,244,.35);border-radius:999px;padding:5px 12px}
@@ -180,10 +184,15 @@ label{display:block;margin:10px 0 4px;color:var(--mute);font-size:.9rem}select,i
 .auth[hidden]{display:none}
 .authcard{width:min(380px,92vw);box-shadow:0 10px 40px rgba(0,0,0,.12)}
 .authcard h1{margin:0 0 6px}
+.auth-logo{display:flex;flex-direction:column;align-items:center;gap:8px;margin:2px 0 14px}
+.auth-logo .logo-mark{width:66px;height:66px}
+.auth-logo .logo-mark i{font-size:1.7rem}
+.auth-logo .logo-word{color:var(--ink);font-size:2.2rem}
+.auth-logo .logo-sub{font-size:.8rem;color:var(--mute)}
 </style>
 </head>
 <body>
-<header><div class="brand"><span class="lamp"></span>منارة</div>
+<header><div class="brand" aria-label="منارة"><span class="logo"><span class="logo-mark" aria-hidden="true"><i>✦</i></span><span class="logo-word">منارة</span></span></div>
 <button class="chip" id="bT">عرض المعلم</button><button class="chip" id="bS">عرض الطالب</button><button class="chip" id="theme" aria-label="تبديل الوضع الليلي والنهاري" title="الوضع الليلي/النهاري">🌙</button><button class="chip" id="out">خروج</button><select id="st" aria-label="الطالب"></select></header>
 <div class="demo">نسخة تجريبية سحابية: التبديل بين العرضين للمعاينة فقط، والتقدّم يُحفظ في Supabase. كل المحتوى مسودات تحتاج مراجعة مختص.</div>
 <div class="shell"><aside id="side" aria-label="القائمة"></aside><main id="app"></main></div>
@@ -192,7 +201,11 @@ label{display:block;margin:10px 0 4px;color:var(--mute);font-size:.9rem}select,i
 <div id="cheer" aria-label="أزرار التشجيع"><button id="ch-star" title="نجمة تشجيعية" aria-label="نجمة تشجيعية">⭐</button><button id="ch-party" title="احتفال ملوّن" aria-label="احتفال ملوّن">🎉</button><button id="ch-lantern" title="فانوس إنجاز" aria-label="فانوس إنجاز">🏮</button><button id="ch-mute" title="كتم أصوات الاحتفال" aria-label="كتم أصوات الاحتفال" aria-pressed="false">🔊</button></div>
 <div id="auth" class="auth" hidden>
   <div class="card authcard">
-    <h1>منارة</h1>
+    <div class="auth-logo" aria-label="منارة">
+      <span class="logo-mark" aria-hidden="true"><i>✦</i></span>
+      <span class="logo-word">منارة</span>
+      <span class="logo-sub">نورُ العلمِ وهدايتُه</span>
+    </div>
     <p class="m">دخول المعلّم لإدارة الطلاب والمهام وحفظ التقدّم سحابياً.</p>
     <label for="em">البريد الإلكتروني</label>
     <input id="em" type="email" autocomplete="username" placeholder="teacher@example.com">
