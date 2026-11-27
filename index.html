@@ -132,6 +132,15 @@ body.board-focus #app>h1{display:none}
 .sw.on{box-shadow:0 0 0 3px var(--lamp)}
 .tool-btn{min-height:40px}
 .tool-btn.on,.board-tools .btn.on{background:var(--deep);color:var(--on);border-color:var(--deep)}
+.board-tools.compact{gap:4px;padding:6px}
+.board-tools.compact .btn{padding:4px 7px;min-height:32px;font-size:.9rem}
+.board-tools.compact .tool-grid{gap:4px}
+.board-tools.compact .tool-grid .btn{padding:4px 6px;min-height:32px}
+.board-tools.compact .tlbl{display:none}
+.board-tools.compact .sw{width:22px;height:22px}
+.board-tools.compact .sep{height:22px;margin:0 1px}
+.board-tools.compact input[type=range]{width:80px}
+.board-tools.compact label{font-size:.78rem}
 .board-canvas{flex:1;min-height:0;display:flex;flex-direction:column;margin:0;padding:8px;position:relative}
 .board-text-form{position:absolute;z-index:6;display:flex;gap:6px;align-items:flex-start;background:var(--card);border:1px solid var(--deep);border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.2)}
 .board-text-form textarea{width:190px;min-height:70px;resize:both;border:1px solid var(--line);border-radius:8px;padding:6px;font:inherit;background:#fff;color:#12292e;direction:rtl}
@@ -148,6 +157,7 @@ body.board-fs-open{overflow:hidden}
   .board-tools .sep{display:none}
   .board-tools .btn{min-height:42px;padding:7px 9px}
   .board-tools .tool-grid .btn{font-size:.8rem}
+  .board-tools.compact .btn,.board-tools.compact .tool-grid .btn{min-height:36px;padding:4px 7px}
   .board-tools input[type=range]{width:90px}
   .board-canvas{padding:6px}
   .board-text-form textarea{width:140px}

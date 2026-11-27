@@ -577,14 +577,16 @@ $('#ch-mute').onclick = () => {
 /* ---------- Smart board ---------- */
 const BOARD_COLORS = ['#12292e', '#b4442f', '#1c8a86', '#17745a', '#d97706', '#7c3aed', '#2563eb', '#ffffff'];
 let board = null, boardLoadToken = 0, boardSaveTimer = null;
+let boardCompact = localStorage.getItem('manara.board.compact') !== 'off';
 const boardIsFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement ||
   document.querySelector('#boardShell')?.classList.contains('board-fs'));
 function syncFullBtn() {
   const b = $('#bfull');
   if (!b) return;
   const on = boardIsFull();
-  b.textContent = on ? '⤢ خروج من ملء الشاشة' : '⛶ ملء الشاشة';
+  b.innerHTML = on ? '⤢ <span class="tlbl">خروج من ملء الشاشة</span>' : '⛶ <span class="tlbl">ملء الشاشة</span>';
   b.title = on ? 'الخروج من ملء الشاشة' : 'ملء الشاشة';
+  b.setAttribute('aria-label', b.title);
   b.classList.toggle('on', on);
 }
 function setFakeFull(on) {
@@ -799,13 +801,13 @@ async function boardView() {
   board = boardPack(data);
   board.drag = null;
   app.innerHTML = `<h1>السبورة الذكية</h1><div class="board-shell" id="boardShell">
-    <div class="board-tools" role="toolbar" aria-label="أدوات السبورة">
+    <div class="board-tools ${boardCompact ? 'compact' : ''}" role="toolbar" aria-label="أدوات السبورة">
       <b class="board-tools-title">🖊️ الأدوات</b>
       <div class="tool-grid">
-        <button class="btn" id="bback" title="العودة للرئيسية">🏠 رجوع</button>
-        ${[['pen','bp','🖊️ فرشاة'],['highlight','bmark','🖍️ تلوين'],['erase','be','🧽 ممحاة'],['text','btext','🅰️ نص'],
-           ['line','bline','╱ خط'],['arrow','barrow','➚ سهم'],['rect','brect','▭ مستطيل'],['ellipse','bellipse','◯ دائرة']]
-          .map(([t,id,label]) => `<button class="btn alt tool-btn ${board.tool === t ? 'on' : ''}" data-tool="${t}" id="${id}" title="${boardToolName(t)}">${label}</button>`).join('')}
+        <button class="btn" id="bback" title="العودة للرئيسية" aria-label="العودة للرئيسية">🏠 <span class="tlbl">رجوع</span></button>
+        ${[['pen','bp','🖊️'],['highlight','bmark','🖍️'],['erase','be','🧽'],['text','btext','🅰️'],
+           ['line','bline','╱'],['arrow','barrow','➚'],['rect','brect','▭'],['ellipse','bellipse','◯']]
+          .map(([t,id,ic]) => `<button class="btn alt tool-btn ${board.tool === t ? 'on' : ''}" data-tool="${t}" id="${id}" title="${boardToolName(t)}" aria-label="${boardToolName(t)}">${ic} <span class="tlbl">${boardToolName(t)}</span></button>`).join('')}
       </div>
       <div class="sep"></div>
       <div class="swatches">${BOARD_COLORS.map(c => `<button class="sw ${c === board.color ? 'on' : ''}" style="background:${c}" data-c="${c}" aria-label="اختر اللون" title="${c}"></button>`).join('')}</div>
@@ -813,12 +815,13 @@ async function boardView() {
       <label for="bw">السمك <b id="bwv">${board.width}</b></label>
       <input id="bw" type="range" min="2" max="28" value="${board.width}" aria-label="سمك الفرشاة والأشكال">
       <div class="sep"></div>
-      <button class="btn alt ${board.grid ? 'on' : ''}" id="bg" title="شبكة تساعد على التناسق">▦ شبكة</button>
-      <button class="btn alt" id="bu" title="تراجع Ctrl+Z">↶ تراجع</button>
-      <button class="btn alt" id="br" title="إعادة Ctrl+Y">↷ إعادة</button>
-      <button class="btn alt" id="bpng" title="تنزيل اللوحة صورة">⬇️ صورة</button>
-      <button class="btn" id="bfull" title="ملء الشاشة">⛶ ملء الشاشة</button>
-      <button class="btn lamp" id="bc">🗑️ مسح</button>
+      <button class="btn alt ${board.grid ? 'on' : ''}" id="bg" title="شبكة تساعد على التناسق" aria-label="شبكة">▦ <span class="tlbl">شبكة</span></button>
+      <button class="btn alt" id="bu" title="تراجع Ctrl+Z" aria-label="تراجع">↶ <span class="tlbl">تراجع</span></button>
+      <button class="btn alt" id="br" title="إعادة Ctrl+Y" aria-label="إعادة">↷ <span class="tlbl">إعادة</span></button>
+      <button class="btn alt" id="bpng" title="تنزيل اللوحة صورة" aria-label="تنزيل صورة">⬇️ <span class="tlbl">صورة</span></button>
+      <button class="btn" id="bfull" title="ملء الشاشة" aria-label="ملء الشاشة">⛶ <span class="tlbl">ملء الشاشة</span></button>
+      <button class="btn lamp" id="bc" title="مسح السبورة" aria-label="مسح السبورة">🗑️ <span class="tlbl">مسح</span></button>
+      <button class="btn alt" id="bcompact" title="${boardCompact ? 'إظهار أسماء الأدوات' : 'تصغير الأدوات'}" aria-label="${boardCompact ? 'توسيع الأدوات' : 'تصغير الأدوات'}">${boardCompact ? '🔼' : '🔽'} <span class="tlbl">${boardCompact ? 'توسيع' : 'تصغير'}</span></button>
     </div>
     <div class="card board-canvas">
       <canvas id="board" class="${board.grid ? 'grid' : ''}" aria-label="لوحة الرسم"></canvas>
@@ -832,6 +835,16 @@ function wireBoard() {
   const cv = $('#board');
   const shell = $('#boardShell');
   if ($('#bback')) $('#bback').onclick = () => go({p: 'home'});
+  if ($('#bcompact')) $('#bcompact').onclick = () => {
+    boardCompact = !boardCompact;
+    try { localStorage.setItem('manara.board.compact', boardCompact ? 'on' : 'off'); } catch (e) {}
+    $('.board-tools').classList.toggle('compact', boardCompact);
+    const b = $('#bcompact');
+    b.innerHTML = boardCompact ? '🔼 <span class="tlbl">توسيع</span>' : '🔽 <span class="tlbl">تصغير</span>';
+    b.title = boardCompact ? 'إظهار أسماء الأدوات' : 'تصغير الأدوات';
+    b.setAttribute('aria-label', boardCompact ? 'توسيع الأدوات' : 'تصغير الأدوات');
+    boardRedraw();
+  };
   if ($('#bfull') && shell) $('#bfull').onclick = async () => {
     if (boardIsFull()) {
       if (document.fullscreenElement || document.webkitFullscreenElement) {
