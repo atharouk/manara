@@ -7,7 +7,7 @@ create table if not exists public.boards (
   strokes    jsonb not null default '[]'::jsonb,
   color      text not null default '#12292e',
   width      integer not null default 4 check (width between 2 and 28),
-  tool       text not null default 'pen' check (tool in ('pen', 'erase')),
+  tool       text not null default 'pen' check (tool in ('pen','erase','highlight','line','rect','ellipse','arrow','text')),
   grid       boolean not null default false,
   updated_at timestamptz not null default now()
 );
@@ -40,6 +40,11 @@ create policy "boards_update" on public.boards
     (public.is_teacher() and owner = 'teacher') or
     (not public.is_teacher() and owner = public.my_student_id())
   );
+
+-- تحديث قيد الأدوات لقاعدة بيانات موجودة (آمن لإعادة التنفيذ).
+alter table public.boards drop constraint if exists boards_tool_check;
+alter table public.boards add constraint boards_tool_check
+  check (tool in ('pen','erase','highlight','line','rect','ellipse','arrow','text'));
 
 revoke all on public.boards from anon;
 grant select, insert, update on public.boards to authenticated;

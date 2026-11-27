@@ -590,10 +590,11 @@ function setFakeFull(on) {
   if (!shell) return;
   shell.classList.toggle('board-fs', on);
   document.body.classList.toggle('board-fs-open', on);
+  $('#btextform')?.remove();
   syncFullBtn();
   if ($('#board')) boardRedraw();
 }
-const onFullChange = () => { syncFullBtn(); if ($('#board')) boardRedraw(); };
+const onFullChange = () => { $('#btextform')?.remove(); syncFullBtn(); if ($('#board')) boardRedraw(); };
 document.addEventListener('fullscreenchange', onFullChange);
 document.addEventListener('webkitfullscreenchange', onFullChange);
 document.addEventListener('keydown', e => {
@@ -604,13 +605,19 @@ const boardOwner = () => mode === 'T' ? 'teacher' : (isTeacher() ? null : (sid |
 const boardKey = () => boardOwner()
   ? 'manara.board.cloud.' + boardOwner()
   : 'manara.board.' + (sid || 'guest');
+const BOARD_TOOLS = ['pen', 'erase', 'highlight', 'line', 'rect', 'ellipse', 'arrow', 'text'];
+const BOARD_TOOL_NAMES = {pen: 'فرشاة', erase: 'ممحاة', highlight: 'تلوين',
+  line: 'خط', rect: 'مستطيل', ellipse: 'دائرة', arrow: 'سهم', text: 'نص'};
+const BOARD_SHAPES = ['line', 'rect', 'ellipse', 'arrow'];
+const boardToolName = t => BOARD_TOOL_NAMES[t] || 'فرشاة';
 function boardPack(data) {
   return {
     owner: boardOwner(), key: boardKey(),
-    strokes: Array.isArray(data?.strokes) ? data.strokes.slice(-400) : [],
+    strokes: Array.isArray(data?.strokes)
+      ? data.strokes.filter(s => s && typeof s === 'object' && typeof s.t === 'string').slice(-400) : [],
     color: typeof data?.color === 'string' ? data.color : BOARD_COLORS[0],
     width: +data?.width > 0 ? Math.min(28, Math.max(2, +data.width)) : 4,
-    tool: data?.tool === 'erase' ? 'erase' : 'pen',
+    tool: BOARD_TOOLS.includes(data?.tool) ? data.tool : 'pen',
     grid: !!data?.grid,
     redo: []
   };
@@ -643,9 +650,10 @@ function boardCtx() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return {ctx, w: r.width, h: r.height};
 }
-function boardDot(ctx, x, y, radius, color, erase) {
+function boardDot(ctx, x, y, radius, color, erase, alpha) {
   ctx.save();
   ctx.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+  ctx.globalAlpha = erase ? 1 : (alpha || 1);
   ctx.fillStyle = erase ? '#000' : color;
   ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
@@ -653,32 +661,119 @@ function boardDot(ctx, x, y, radius, color, erase) {
 function boardSegment(ctx, a, b, w, h, s) {
   ctx.save();
   ctx.globalCompositeOperation = s.t === 'erase' ? 'destination-out' : 'source-over';
+  ctx.globalAlpha = s.t === 'highlight' ? .38 : 1;
   ctx.strokeStyle = s.t === 'erase' ? '#000' : s.c;
   ctx.lineWidth = s.w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.beginPath(); ctx.moveTo(a[0] * w, a[1] * h); ctx.lineTo(b[0] * w, b[1] * h); ctx.stroke();
   ctx.restore();
 }
+function boardShape(ctx, s, w, h) {
+  if (!Array.isArray(s.a) || !Array.isArray(s.b)) return;
+  const x1 = s.a[0] * w, y1 = s.a[1] * h, x2 = s.b[0] * w, y2 = s.b[1] * h;
+  ctx.save();
+  ctx.strokeStyle = s.c; ctx.lineWidth = s.w || 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (s.t === 'line') {
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  } else if (s.t === 'rect') {
+    ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+  } else if (s.t === 'ellipse') {
+    ctx.beginPath();
+    ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (s.t === 'arrow') {
+    const ang = Math.atan2(y2 - y1, x2 - x1), head = Math.max(11, (s.w || 4) * 4);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - head * Math.cos(ang - Math.PI / 6), y2 - head * Math.sin(ang - Math.PI / 6));
+    ctx.lineTo(x2 - head * Math.cos(ang + Math.PI / 6), y2 - head * Math.sin(ang + Math.PI / 6));
+    ctx.closePath(); ctx.fillStyle = s.c; ctx.fill();
+  }
+  ctx.restore();
+}
+function boardTextSize(s) { return Math.max(18, Math.min(44, +(s?.size || 26))); }
+function boardText(ctx, s, w, h) {
+  if (typeof s.x !== 'number' || typeof s.y !== 'number' || !s.text) return;
+  ctx.save();
+  ctx.fillStyle = s.c; ctx.font = `600 ${boardTextSize(s)}px system-ui, sans-serif`;
+  ctx.direction = 'rtl'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  String(s.text).split('\n').forEach((line, i) =>
+    ctx.fillText(line, s.x * w, s.y * h + i * boardTextSize(s) * 1.25));
+  ctx.restore();
+}
 function boardDrawStroke(ctx, s, w, h) {
-  if (!s.p?.length) return;
-  if (s.p.length === 1) { boardDot(ctx, s.p[0][0] * w, s.p[0][1] * h, s.w / 2, s.c, s.t === 'erase'); return; }
+  if (!s || typeof s.t !== 'string') return;
+  if (BOARD_SHAPES.includes(s.t)) { boardShape(ctx, s, w, h); return; }
+  if (s.t === 'text') { boardText(ctx, s, w, h); return; }
+  if (!Array.isArray(s.p) || !s.p.length) return;
+  if (s.p.length === 1) {
+    boardDot(ctx, s.p[0][0] * w, s.p[0][1] * h, s.w / 2, s.c,
+      s.t === 'erase', s.t === 'highlight' ? .38 : 1); return;
+  }
   ctx.save();
   ctx.globalCompositeOperation = s.t === 'erase' ? 'destination-out' : 'source-over';
+  ctx.globalAlpha = s.t === 'highlight' ? .38 : 1;
   ctx.strokeStyle = s.t === 'erase' ? '#000' : s.c;
   ctx.lineWidth = s.w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.beginPath();
   s.p.forEach((p, i) => i ? ctx.lineTo(p[0] * w, p[1] * h) : ctx.moveTo(p[0] * w, p[1] * h));
   ctx.stroke(); ctx.restore();
 }
+function boardBounds(s, w, h) {
+  if (s?.t === 'text' && typeof s.x === 'number' && typeof s.y === 'number') {
+    const size = boardTextSize(s), lines = String(s.text || '').split('\n');
+    const right = s.x * w, top = s.y * h;
+    const wide = Math.max(1, ...lines.map(l => l.length)) * size * .72;
+    return [right - wide, top, right, top + lines.length * size * 1.25];
+  }
+  let pts = Array.isArray(s?.p) ? s.p : (Array.isArray(s?.a) && Array.isArray(s?.b) ? [s.a, s.b] : []);
+  if (!pts.length) return null;
+  return [Math.min(...pts.map(p => p[0] * w)), Math.min(...pts.map(p => p[1] * h)),
+    Math.max(...pts.map(p => p[0] * w)), Math.max(...pts.map(p => p[1] * h))];
+}
+function boardHit(s, pts, pad, w, h) {
+  const b = boardBounds(s, w, h);
+  if (!b) return false;
+  return pts.some(p => {
+    const x = p[0] * w, y = p[1] * h;
+    return x >= b[0] - pad && x <= b[2] + pad && y >= b[1] - pad && y <= b[3] + pad;
+  });
+}
+function boardErase(pts, pad) {
+  const c = boardCtx();
+  if (!c || !pts?.length) return false;
+  const removed = [];
+  board.strokes.forEach((s, i) => { if (boardHit(s, pts, pad, c.w, c.h)) removed.push({i, s}); });
+  if (!removed.length) return false;
+  removed.reverse().forEach(({i}) => board.strokes.splice(i, 1));
+  board.redo.push({k: 'erase', items: removed});
+  return true;
+}
 function boardStatus() {
   const el = $('#bstat');
-  if (el) el.textContent = `${N(board.strokes.length)} ضغطة · ${board.tool === 'erase' ? 'ممحاة' : 'فرشاة'}`;
+  if (el) el.textContent = `${N(board.strokes.length)} عنصر · ${boardToolName(board.tool)}`;
 }
 function boardRedraw() {
   const c = boardCtx();
   if (!c) return;
   c.ctx.clearRect(0, 0, c.w, c.h);
   board.strokes.forEach(s => boardDrawStroke(c.ctx, s, c.w, c.h));
+  if (board.drag?.preview) boardDrawStroke(c.ctx, board.drag.preview, c.w, c.h);
   boardStatus();
+}
+function boardUndo() {
+  if (!board.strokes.length) return;
+  board.redo.push({k: 'add', s: board.strokes.pop()});
+  boardSave(); boardRedraw();
+}
+function boardRedoLast() {
+  if (!board.redo.length) return;
+  const r = board.redo.pop();
+  if (r && r.k === 'erase') {
+    r.items.slice().sort((a, b) => a.i - b.i)
+      .forEach(({i, s}) => board.strokes.splice(Math.min(i, board.strokes.length), 0, s));
+  } else board.strokes.push(r?.s || r);
+  boardSave(); boardRedraw();
 }
 async function boardView() {
   const token = ++boardLoadToken;
@@ -704,15 +799,18 @@ async function boardView() {
   app.innerHTML = `<h1>السبورة الذكية</h1><div class="board-shell" id="boardShell">
     <div class="board-tools" role="toolbar" aria-label="أدوات السبورة">
       <b class="board-tools-title">🖊️ الأدوات</b>
+      <div class="tool-grid">
+        ${[['pen','bp','🖊️ فرشاة'],['highlight','bmark','🖍️ تلوين'],['erase','be','🧽 ممحاة'],['text','btext','🅰️ نص'],
+           ['line','bline','╱ خط'],['arrow','barrow','➚ سهم'],['rect','brect','▭ مستطيل'],['ellipse','bellipse','◯ دائرة']]
+          .map(([t,id,label]) => `<button class="btn alt tool-btn ${board.tool === t ? 'on' : ''}" data-tool="${t}" id="${id}" title="${boardToolName(t)}">${label}</button>`).join('')}
+      </div>
+      <div class="sep"></div>
       <div class="swatches">${BOARD_COLORS.map(c => `<button class="sw ${c === board.color ? 'on' : ''}" style="background:${c}" data-c="${c}" aria-label="اختر اللون" title="${c}"></button>`).join('')}</div>
       <div class="sep"></div>
-      <button class="btn alt tool-btn ${board.tool === 'pen' ? 'on' : ''}" id="bp">🖊️ فرشاة</button>
-      <button class="btn alt tool-btn ${board.tool === 'erase' ? 'on' : ''}" id="be">🧽 ممحاة</button>
-      <div class="sep"></div>
       <label for="bw">السمك <b id="bwv">${board.width}</b></label>
-      <input id="bw" type="range" min="2" max="28" value="${board.width}" aria-label="سمك الفرشاة">
+      <input id="bw" type="range" min="2" max="28" value="${board.width}" aria-label="سمك الفرشاة والأشكال">
       <div class="sep"></div>
-      <button class="btn alt tool-btn ${board.grid ? 'on' : ''}" id="bg" title="شبكة تساعد على التناسق">▦ شبكة</button>
+      <button class="btn alt ${board.grid ? 'on' : ''}" id="bg" title="شبكة تساعد على التناسق">▦ شبكة</button>
       <button class="btn alt" id="bu" title="تراجع Ctrl+Z">↶ تراجع</button>
       <button class="btn alt" id="br" title="إعادة Ctrl+Y">↷ إعادة</button>
       <button class="btn alt" id="bpng" title="تنزيل اللوحة صورة">⬇️ صورة</button>
@@ -721,7 +819,7 @@ async function boardView() {
     </div>
     <div class="card board-canvas">
       <canvas id="board" class="${board.grid ? 'grid' : ''}" aria-label="لوحة الرسم"></canvas>
-      <div class="board-foot"><span class="m" id="bstat"></span><span class="m">ارسم بالفأرة أو اللمس · Ctrl+Z للتراجع</span><span class="m" id="bsave">${board.owner ? 'جاهز للحفظ في Supabase' : 'محفوظ في هذا المتصفح'}</span></div>
+      <div class="board-foot"><span class="m" id="bstat"></span><span class="m">ارسم أو اكتب بالنقر · اسحب لرسم شكل · الممحاة تحذف العناصر</span><span class="m" id="bsave">${board.owner ? 'جاهز للحفظ في Supabase' : 'محفوظ في هذا المتصفح'}</span></div>
     </div>
   </div>`;
   wireBoard();
@@ -749,19 +847,63 @@ function wireBoard() {
     const clamp = v => Math.min(1, Math.max(0, v));
     return [clamp((e.clientX - r.left) / r.width), clamp((e.clientY - r.top) / r.height)];
   };
+  const closeTextForm = commit => {
+    const f = $('#btextform');
+    if (!f) return;
+    const val = f.querySelector('textarea')?.value.trim() || '';
+    f.remove();
+    if (!commit || !val) return;
+    board.strokes.push({t: 'text', x: +f.dataset.x, y: +f.dataset.y, text: val, c: board.color,
+      size: Math.max(18, Math.min(44, board.width * 5))});
+    if (board.strokes.length > 400) board.strokes.shift();
+    board.redo = []; boardSave(); boardRedraw();
+  };
+  const openTextForm = p => {
+    $('#btextform')?.remove();
+    const wrap = $('.board-canvas'), cr = wrap.getBoundingClientRect(), br = cv.getBoundingClientRect();
+    const f = document.createElement('div');
+    f.id = 'btextform'; f.className = 'board-text-form';
+    f.dataset.x = p[0]; f.dataset.y = p[1];
+    f.style.left = `${br.left - cr.left + Math.max(4, Math.min(p[0] * br.width - 190, br.width - 210))}px`;
+    f.style.top = `${br.top - cr.top + Math.max(4, Math.min(p[1] * br.height, br.height - 100))}px`;
+    f.innerHTML = `<textarea dir="rtl" placeholder="اكتب النص هنا..."></textarea>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="btn lamp" type="button" data-ok>إضافة</button>
+        <button class="btn alt" type="button" data-no>إلغاء</button>
+      </div>`;
+    wrap.appendChild(f);
+    const ta = f.querySelector('textarea');
+    f.querySelector('[data-ok]').onclick = () => closeTextForm(true);
+    f.querySelector('[data-no]').onclick = () => closeTextForm(false);
+    ta.onkeydown = e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeTextForm(true); }
+      if (e.key === 'Escape') { e.preventDefault(); closeTextForm(false); }
+    };
+    ta.focus();
+  };
   cv.addEventListener('pointerdown', e => {
     e.preventDefault();
+    const p = point(e);
+    if (board.tool === 'text') { openTextForm(p); return; }
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
-    const p = point(e), width = board.tool === 'erase' ? board.width * 3 : board.width;
+    if (BOARD_SHAPES.includes(board.tool)) {
+      const s = {t: board.tool, c: board.color, w: board.width, a: p, b: p};
+      board.drag = {id: e.pointerId, shape: true, stroke: s, preview: s};
+      boardRedraw(); return;
+    }
+    const width = board.tool === 'erase' || board.tool === 'highlight' ? Math.max(12, board.width * 3) : board.width;
     board.drag = {id: e.pointerId, stroke: {c: board.color, w: width, t: board.tool, p: [p]}};
     const c = boardCtx();
-    boardDot(c.ctx, p[0] * c.w, p[1] * c.h, width / 2, board.color, board.tool === 'erase');
+    boardDot(c.ctx, p[0] * c.w, p[1] * c.h, width / 2, board.color,
+      board.tool === 'erase', board.tool === 'highlight' ? .38 : 1);
   });
   cv.addEventListener('pointermove', e => {
     const d = board.drag;
     if (!d || d.id !== e.pointerId) return;
     e.preventDefault();
-    const p = point(e), last = d.stroke.p[d.stroke.p.length - 1];
+    const p = point(e);
+    if (d.shape) { d.stroke.b = p; d.preview = d.stroke; boardRedraw(); return; }
+    const last = d.stroke.p[d.stroke.p.length - 1];
     if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 0.001) return;
     d.stroke.p.push(p);
     const c = boardCtx();
@@ -771,6 +913,18 @@ function wireBoard() {
     const d = board.drag;
     if (!d || d.id !== e.pointerId) return;
     board.drag = null;
+    if (d.shape) {
+      if (Math.abs(d.stroke.b[0] - d.stroke.a[0]) + Math.abs(d.stroke.b[1] - d.stroke.a[1]) < .012) {
+        boardRedraw(); return;
+      }
+      board.strokes.push(d.stroke);
+      if (board.strokes.length > 400) board.strokes.shift();
+      board.redo = []; boardSave(); boardRedraw(); return;
+    }
+    if (d.stroke.t === 'erase') {
+      if (boardErase(d.stroke.p || [], Math.max(18, board.width * 3) / 2)) boardSave();
+      boardRedraw(); return;
+    }
     board.strokes.push(d.stroke);
     if (board.strokes.length > 400) board.strokes.shift();
     board.redo = [];
@@ -779,17 +933,17 @@ function wireBoard() {
   cv.addEventListener('pointerup', end);
   cv.addEventListener('pointercancel', end);
   const setTool = t => {
+    if (!BOARD_TOOLS.includes(t)) return;
     board.tool = t;
-    $('#bp').classList.toggle('on', t === 'pen');
-    $('#be').classList.toggle('on', t === 'erase');
+    app.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    if ($('#btextform')) closeTextForm(false);
     boardSave(); boardStatus();
   };
-  $('#bp').onclick = () => setTool('pen');
-  $('#be').onclick = () => setTool('erase');
+  app.querySelectorAll('.tool-btn').forEach(b => b.onclick = () => setTool(b.dataset.tool));
   app.querySelectorAll('.sw').forEach(b => b.onclick = () => {
     board.color = b.dataset.c;
     app.querySelectorAll('.sw').forEach(x => x.classList.toggle('on', x === b));
-    setTool('pen');
+    if (board.tool === 'erase') setTool('pen'); else { boardSave(); boardStatus(); }
   });
   $('#bw').oninput = e => { board.width = +e.target.value; $('#bwv').textContent = board.width; boardSave(); };
   $('#bg').onclick = () => {
@@ -798,11 +952,12 @@ function wireBoard() {
     $('#bg').classList.toggle('on', board.grid);
     boardSave();
   };
-  $('#bu').onclick = () => { if (!board.strokes.length) return; board.redo.push(board.strokes.pop()); boardSave(); boardRedraw(); };
-  $('#br').onclick = () => { if (!board.redo.length) return; board.strokes.push(board.redo.pop()); boardSave(); boardRedraw(); };
+  $('#bu').onclick = boardUndo;
+  $('#br').onclick = boardRedoLast;
   $('#bc').onclick = () => {
     if (!board.strokes.length || !confirm('مسح كل ما رسمته على السبورة؟')) return;
-    board.redo = board.strokes.splice(0); boardSave(); boardRedraw(); toast('تم مسح السبورة');
+    board.redo.push({k: 'erase', items: board.strokes.map((s, i) => ({i, s}))});
+    board.strokes = []; boardSave(); boardRedraw(); toast('تم مسح السبورة');
   };
   $('#bpng').onclick = () => {
     const out = document.createElement('canvas');
@@ -824,8 +979,8 @@ function wireBoard() {
 addEventListener('keydown', e => {
   if (view.p !== 'board' || !board || /INPUT|TEXTAREA/.test(document.activeElement?.tagName || '')) return;
   const k = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); (e.shiftKey ? $('#br') : $('#bu'))?.click(); }
-  if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); $('#br')?.click(); }
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); boardUndo(); }
+  if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); boardRedoLast(); }
 });
 addEventListener('resize', () => { if (view.p === 'board') boardRedraw(); });
 

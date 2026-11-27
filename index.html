@@ -120,11 +120,16 @@ th,td{padding:9px 8px;text-align:start;border-bottom:1px solid var(--line);font-
 .board-tools .btn{width:100%;text-align:center;min-height:40px}
 .board-tools label{display:flex;align-items:center;justify-content:space-between;margin:0;color:var(--mute);font-size:.85rem}
 .board-tools input[type=range]{width:100%;margin:0}
+.board-tools .tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.board-tools .tool-grid .btn{width:100%;padding:8px 4px;font-size:.82rem;min-height:42px}
 .sw{width:30px;height:30px;border-radius:50%;border:2px solid var(--card);box-shadow:0 0 0 1px var(--line);padding:0}
 .sw.on{box-shadow:0 0 0 3px var(--lamp)}
 .tool-btn{min-height:40px}
 .tool-btn.on,.board-tools .btn.on{background:var(--deep);color:var(--on);border-color:var(--deep)}
-.board-canvas{margin:0}
+.board-canvas{margin:0;position:relative}
+.board-text-form{position:absolute;z-index:6;display:flex;gap:6px;align-items:flex-start;background:var(--card);border:1px solid var(--deep);border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.2)}
+.board-text-form textarea{width:190px;min-height:70px;resize:both;border:1px solid var(--line);border-radius:8px;padding:6px;font:inherit;background:#fff;color:#12292e;direction:rtl}
+.board-text-form .btn{padding:6px 10px;font-size:.8rem}
 #board{display:block;width:100%;height:min(72vh,700px);min-height:420px;background:#fff;border:2px solid var(--line);border-radius:14px;touch-action:none;cursor:crosshair}
 #board.grid{background-image:radial-gradient(#cbd8d6 1px,transparent 1.2px);background-size:24px 24px}
 .board-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px}
@@ -139,8 +144,11 @@ body.board-fs-open{overflow:hidden}
   .board-tools .sep,.board-tools-title{display:none}
   .board-tools .swatches{display:flex;flex-wrap:wrap;gap:6px}
   .board-tools .btn{width:auto;min-height:42px}
+  .board-tools .tool-grid{display:flex;flex-wrap:wrap;gap:6px}
+  .board-tools .tool-grid .btn{width:auto}
   .board-tools label{margin-inline-start:4px}
   .board-tools input[type=range]{width:110px}
+  .board-text-form textarea{width:140px}
   #board{height:56vh;min-height:300px}
   .sw{width:34px;height:34px}
 }
