@@ -506,7 +506,8 @@ function render() {
   $('#bS').classList.toggle('on', mode === 'S');
   $('#st').style.display = isTeacher() && mode === 'S' ? '' : 'none';
   $('#st').innerHTML = students.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${E(s.n)}</option>`).join('');
-  $('#cheer').classList.toggle('on', view.p === 'lesson' && !isTeacher());
+  // المعلّم يرى أزرار التشجيع في كل الصفحات، والطالب داخل الدرس فقط.
+  $('#cheer').classList.toggle('on', isTeacher() || view.p === 'lesson');
   side();
   ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, recitations: trec, quran, board: boardView, stars: starsView, sec: ssec, lesson})[view.p]();
 }
