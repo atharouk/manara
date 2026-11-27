@@ -508,6 +508,8 @@ function render() {
   $('#st').innerHTML = students.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${E(s.n)}</option>`).join('');
   // المعلّم يرى أزرار التشجيع في كل الصفحات، والطالب داخل الدرس فقط.
   $('#cheer').classList.toggle('on', isTeacher() || view.p === 'lesson');
+  if (view.p !== 'board' && $('#boardShell')?.classList.contains('board-fs')) setFakeFull(false);
+  document.body.classList.toggle('board-focus', view.p === 'board');
   side();
   ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, recitations: trec, quran, board: boardView, stars: starsView, sec: ssec, lesson})[view.p]();
 }
@@ -800,6 +802,7 @@ async function boardView() {
     <div class="board-tools" role="toolbar" aria-label="أدوات السبورة">
       <b class="board-tools-title">🖊️ الأدوات</b>
       <div class="tool-grid">
+        <button class="btn" id="bback" title="العودة للرئيسية">🏠 رجوع</button>
         ${[['pen','bp','🖊️ فرشاة'],['highlight','bmark','🖍️ تلوين'],['erase','be','🧽 ممحاة'],['text','btext','🅰️ نص'],
            ['line','bline','╱ خط'],['arrow','barrow','➚ سهم'],['rect','brect','▭ مستطيل'],['ellipse','bellipse','◯ دائرة']]
           .map(([t,id,label]) => `<button class="btn alt tool-btn ${board.tool === t ? 'on' : ''}" data-tool="${t}" id="${id}" title="${boardToolName(t)}">${label}</button>`).join('')}
@@ -828,6 +831,7 @@ async function boardView() {
 function wireBoard() {
   const cv = $('#board');
   const shell = $('#boardShell');
+  if ($('#bback')) $('#bback').onclick = () => go({p: 'home'});
   if ($('#bfull') && shell) $('#bfull').onclick = async () => {
     if (boardIsFull()) {
       if (document.fullscreenElement || document.webkitFullscreenElement) {
