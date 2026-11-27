@@ -6,7 +6,7 @@
 >
 > **المستودع:** https://github.com/atharouk/manara-app
 >
-> **حساب المعلّم التجريبي:** `manara.teacher@example.com` — كلمة المرور: `Manara@2026`
+> **حساب المعلّم التجريبي:** `manara.teacher@example.com` أو `reysahrawi2013@gmail.com` — كلمة المرور: `Manara@2026`
 >
 > **حسابا طلاب تجريبيان:** `ahmad.student@example.com` و`maryam.student@example.com` — كلمة المرور: `Student@2026`
 
