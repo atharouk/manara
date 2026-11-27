@@ -233,10 +233,49 @@ const CHEERS = {
   lantern: {icon: '🏮', emojis: ['🏮', '⭐', '✨', '🕯️'], title: 'أنهيت الدرس!', sub: 'أُضيف فانوس لسجل إنجازك 🏮'}
 };
 const RIBBON_COLORS = ['#f2b134', '#1c8a86', '#b4442f', '#7c3aed', '#2563eb', '#17745a'];
-let celebrateTimer = null;
+const SOUND_NOTES = {
+  star: [[523, .12], [659, .12], [784, .12], [1046, .22]],
+  party: [[523, .1], [659, .1], [784, .1], [1046, .14], [784, .1], [1046, .24]],
+  lantern: [[392, .16], [523, .16], [659, .3]],
+  spark: [[880, .07], [1175, .09]]
+};
+let celebrateTimer = null, audioCtx = null;
+let soundOn = localStorage.getItem('manara.sound') !== 'off';
+function tone(freq, at, dur, type, vol) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(.0001, at);
+  g.gain.exponentialRampToValueAtTime(Math.max(.0002, vol), at + .012);
+  g.gain.exponentialRampToValueAtTime(.0001, at + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(at); o.stop(at + dur + .02);
+}
+function cheerSound(kind = 'party') {
+  if (!soundOn) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t = audioCtx.currentTime + .01;
+    (SOUND_NOTES[kind] || SOUND_NOTES.party).forEach(([f, d], i) =>
+      tone(f, t + i * .085, d, kind === 'spark' ? 'sine' : 'triangle', (kind === 'spark' ? .025 : .055)));
+  } catch (e) {}
+}
+function updateSoundBtn() {
+  const b = $('#ch-mute');
+  if (!b) return;
+  const label = soundOn ? 'كتم أصوات الاحتفال' : 'تشغيل أصوات الاحتفال';
+  b.textContent = soundOn ? '🔊' : '🔇';
+  b.title = label; b.setAttribute('aria-label', label);
+  b.setAttribute('aria-pressed', String(!soundOn));
+  b.classList.toggle('off', !soundOn);
+}
 function celebrate(kind = 'party', title, sub) {
   const host = $('#celebrate');
   if (!host) return;
+  cheerSound(kind);
   const c = CHEERS[kind] || CHEERS.party;
   host.innerHTML = `<div class="msg"><b>${c.icon} ${E(title || c.title)}</b>${(sub || c.sub) ? `<span class="m">${E(sub || c.sub)}</span>` : ''}</div>`;
   for (let i = 0; i < 26; i++) {
@@ -256,6 +295,8 @@ function celebrate(kind = 'party', title, sub) {
 function sparkleAt(el) {
   const host = $('#celebrate');
   if (!host || !el) return;
+  const now = Date.now();
+  if (now - (sparkleAt.lastSound || 0) > 160) { cheerSound('spark'); sparkleAt.lastSound = now; }
   const r = el.getBoundingClientRect();
   for (let i = 0; i < 9; i++) {
     const s = document.createElement('span');
@@ -438,6 +479,22 @@ function prog(s) {
   const l = lvIt(s.lv), d = l.filter(i => done[s.id].has(i.id)).length;
   return {d, t: l.length, pct: l.length ? Math.round(d / l.length * 100) : 0};
 }
+const STAR_BADGES = [
+  {at: 0, icon: '🌱', name: 'بداية متألّقة'},
+  {at: 5, icon: '⭐', name: 'نجم مبتدئ'},
+  {at: 15, icon: '🌟', name: 'نجم مجتهد'},
+  {at: 30, icon: '🏆', name: 'نجم متألّق'},
+  {at: 50, icon: '🏮', name: 'فانوس منارة'}
+];
+function starsOf(id) {
+  const lessons = done[id]?.size || 0;
+  const recs = recitations.filter(r => r.student_id === id && r.status === 'approved').length;
+  const quizzes = recitations.filter(r => r.student_id === id && r.quiz_passed).length;
+  const total = lessons + recs + quizzes;
+  const badge = [...STAR_BADGES].reverse().find(b => total >= b.at) || STAR_BADGES[0];
+  const next = STAR_BADGES.find(b => total < b.at) || null;
+  return {lessons, recs, quizzes, total, badge, next};
+}
 function go(v) { view = v; render(); window.scrollTo(0, 0); }
 function render() {
   // الطالب لا يصل إلى صفحات المعلّم حتى لو تغيّرت حالة الواجهة
@@ -451,12 +508,12 @@ function render() {
   $('#st').innerHTML = students.map(s => `<option value="${s.id}" ${s.id === sid ? 'selected' : ''}>${E(s.n)}</option>`).join('');
   $('#cheer').classList.toggle('on', view.p === 'lesson' && !isTeacher());
   side();
-  ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, recitations: trec, quran, board: boardView, sec: ssec, lesson})[view.p]();
+  ({home: () => mode === 'T' ? thome() : shome(), students: tstud, cur: tcur, tasks: ttasks, reports: treports, recitations: trec, quran, board: boardView, stars: starsView, sec: ssec, lesson})[view.p]();
 }
 function side() {
   const it = mode === 'T'
     ? [['home', '🏠', 'الرئيسية'], ['students', '👥', 'الطلاب'], ['cur', '📚', 'المنهج'], ['tasks', '✅', 'المهام'], ['reports', '📊', 'التقارير'], ['recitations', '🎙️', 'التلاوات'], ['quran', '📖', 'القرآن'], ['board', '🖊️', 'السبورة']]
-    : [['home', '🏠', 'الرئيسية'], ['quran', '📖', 'القرآن'], ['board', '🖊️', 'السبورة'], ...SECS.map(s => ['sec:' + s.id, s.icon, s.t])];
+    : [['home', '🏠', 'الرئيسية'], ['quran', '📖', 'القرآن'], ['board', '🖊️', 'السبورة'], ['stars', '🏆', 'إنجازاتي'], ...SECS.map(s => ['sec:' + s.id, s.icon, s.t])];
   const cur = view.p === 'sec' ? 'sec:' + view.sec : view.p;
   const near = nearTasks(mode === 'T' ? null : sid).length;
   const late = lateRecitations(mode === 'T' ? null : sid).length;
@@ -506,6 +563,13 @@ matchMedia('(prefers-color-scheme:dark)').addEventListener?.('change', () => {
 $('#ch-star').onclick = () => celebrate('star');
 $('#ch-party').onclick = () => celebrate('party');
 $('#ch-lantern').onclick = () => celebrate('lantern');
+updateSoundBtn();
+$('#ch-mute').onclick = () => {
+  soundOn = !soundOn;
+  localStorage.setItem('manara.sound', soundOn ? 'on' : 'off');
+  updateSoundBtn();
+  if (soundOn) cheerSound('star');
+};
 
 /* ---------- Smart board ---------- */
 const BOARD_COLORS = ['#12292e', '#b4442f', '#1c8a86', '#17745a', '#d97706', '#7c3aed', '#2563eb', '#ffffff'];
@@ -803,6 +867,7 @@ function profileDlg(id) {
   const myAssigns = assigns.filter(a => tgt(a).includes(s));
   const myRec = recitations.filter(r => r.student_id === id);
   const late = lateRecitations(id).length, redo = redoRequests(id).length;
+  const stars = starsOf(id);
   const subs = SECS.map(x => {
     const it = D.items.filter(i => i.sec === x.id);
     const c = it.filter(i => done[id].has(i.id)).length;
@@ -813,6 +878,7 @@ function profileDlg(id) {
     <div class="card"><div class="row"><div class="grow"><b>${E(s.lv)}</b><div class="m">${acc ? E(acc.email || 'حساب مربوط') : 'لا يوجد حساب دخول'}</div></div><span class="tag">${N(p.pct)}% في مستواه</span></div></div>
     <div class="stats" style="margin:10px 0">
       <div class="card stat"><b>${N(done[id].size)}</b><span>درس منجز</span></div>
+      <div class="card stat c-warn"><i class="si">⭐</i><b>${N(stars.total)}</b><span>نجمة إنجاز</span></div>
       <div class="card stat"><b>${N(myRec.filter(r => r.status === 'approved').length)}</b><span>تلاوة مقبولة</span></div>
       <div class="card stat"><b>${N(myRec.filter(r => r.status === 'pending').length)}</b><span>بانتظار المراجعة</span></div>
       <div class="card stat"><b>${N(late)}</b><span>تأخير تلاوة</span></div>
@@ -939,7 +1005,8 @@ function reportData() {
   });
   const rows = students.map(s => {
     const r = {name: s.n, level: s.lv, pct: prog(s).pct, done: done[s.id].size,
-      rec: recitations.filter(x => x.student_id === s.id && x.status === 'approved').length};
+      rec: recitations.filter(x => x.student_id === s.id && x.status === 'approved').length,
+      stars: starsOf(s.id).total};
     subs.forEach(({x, it}) => {
       const c = it.filter(i => done[s.id].has(i.id)).length;
       r[x.id] = it.length ? Math.round(c / it.length * 100) : 0;
@@ -948,26 +1015,27 @@ function reportData() {
     return r;
   });
   const allDone = students.reduce((a, s) => a + done[s.id].size, 0);
+  const allStars = students.reduce((a, s) => a + starsOf(s.id).total, 0);
   const allPct = students.length ? Math.round(students.reduce((a, s) => a + prog(s).pct, 0) / students.length) : 0;
   const ready = students.filter(s => prog(s).pct >= 80 && s.lv !== 'متقدم').length;
   const approved = recitations.filter(r => r.status === 'approved').length;
   const pending = recitations.filter(r => r.status === 'pending').length;
-  return {subs, rows, allDone, allPct, ready, approved, pending};
+  return {subs, rows, allDone, allStars, allPct, ready, approved, pending};
 }
 const csvCell = v => `"${String(v).replace(/"/g, '""')}"`;
 function exportCSV() {
-  const {subs, allPct, allDone, ready, approved, pending} = reportData();
+  const {subs, allPct, allDone, allStars, ready, approved, pending} = reportData();
   const rows = reportRows();
-  const head = ['الطالب', 'المستوى', 'الإنجاز العام %', 'الدروس المنجزة', 'تلاوات مقبولة',
+  const head = ['الطالب', 'المستوى', 'الإنجاز العام %', 'الدروس المنجزة', 'تلاوات مقبولة', 'النجوم',
     ...subs.flatMap(({x}) => [`${x.t} %`, `${x.t} (منجز/إجمالي)`])];
   const lines = [
     ['تقرير منارة', new Date().toLocaleString('ar-EG')],
-    ['الإنجاز العام %', allPct], ['الدروس المنجزة', allDone], ['جاهزون للترقية', ready],
+    ['الإنجاز العام %', allPct], ['الدروس المنجزة', allDone], ['إجمالي النجوم', allStars], ['جاهزون للترقية', ready],
     ['تلاوات مقبولة', approved], ['تلاوات بانتظار المراجعة', pending],
     ['النتائج المعروضة', `${rows.length} من ${students.length}`],
     ['البحث', reportFilter.q || '—'], ['المستوى', reportFilter.lv || 'الكل'],
     [], head,
-    ...rows.map(r => [r.name, r.level, r.pct, r.done, r.rec,
+    ...rows.map(r => [r.name, r.level, r.pct, r.done, r.rec, r.stars,
       ...subs.flatMap(({x}) => [r[x.id], r[x.id + '_cnt']])
     ])
   ];
@@ -993,7 +1061,8 @@ function reportRows() {
     pct: (a, b) => b.pct - a.pct,
     name: (a, b) => a.name.localeCompare(b.name, 'ar'),
     done: (a, b) => b.done - a.done,
-    rec: (a, b) => b.rec - a.rec
+    rec: (a, b) => b.rec - a.rec,
+    stars: (a, b) => b.stars - a.stars
   };
   return rows.sort(by[reportFilter.sort] || by.pct);
 }
@@ -1001,13 +1070,13 @@ function refreshReportTable() {
   const body = $('#rbody');
   if (!body) return;
   const rows = reportRows();
-  body.innerHTML = rows.length ? rows.map(r => `<tr><td><b>${E(r.name)}</b></td><td>${E(r.level)}</td><td><div class="bar" title="${r.pct}%"><i style="width:${r.pct}%"></i></div></td>${SECS.map(x => `<td><div class="bar" title="${r[x.id]}%"><i style="width:${r[x.id]}%"></i></div></td>`).join('')}</tr>`).join('')
-    : `<tr><td colspan="${SECS.length + 3}" class="m">لا توجد نتائج مطابقة للبحث أو التصفية.</td></tr>`;
+  body.innerHTML = rows.length ? rows.map(r => `<tr><td><b>${E(r.name)}</b></td><td>${E(r.level)}</td><td>⭐ ${N(r.stars)}</td><td><div class="bar" title="${r.pct}%"><i style="width:${r.pct}%"></i></div></td>${SECS.map(x => `<td><div class="bar" title="${r[x.id]}%"><i style="width:${r[x.id]}%"></i></div></td>`).join('')}</tr>`).join('')
+    : `<tr><td colspan="${SECS.length + 4}" class="m">لا توجد نتائج مطابقة للبحث أو التصفية.</td></tr>`;
   const c = $('#rcount');
   if (c) c.textContent = `${N(rows.length)} من ${N(students.length)} طالب`;
 }
 function treports() {
-  const {subs, allDone, allPct, ready, approved, pending} = reportData();
+  const {subs, allDone, allStars, allPct, ready, approved, pending} = reportData();
   app.innerHTML = `<div class="print-head"><h1>منارة — تقرير المتابعة</h1><p>تاريخ التقرير: ${new Date().toLocaleString('ar-EG')}</p></div>
     <h1>التقارير</h1>
     <div class="row" style="margin-bottom:10px;flex-wrap:wrap;gap:6px">
@@ -1018,13 +1087,14 @@ function treports() {
         <option value="name" ${reportFilter.sort === 'name' ? 'selected' : ''}>حسب الاسم</option>
         <option value="done" ${reportFilter.sort === 'done' ? 'selected' : ''}>الأكثر دروساً</option>
         <option value="rec" ${reportFilter.sort === 'rec' ? 'selected' : ''}>الأكثر تلاوات</option>
+        <option value="stars" ${reportFilter.sort === 'stars' ? 'selected' : ''}>الأكثر نجوماً</option>
       </select>
       <span class="grow m" id="rcount"></span>
       <button class="btn alt" id="excsv">تصدير CSV</button><button class="btn" id="expdf">حفظ PDF</button>
     </div>
-    <div class="stats"><div class="card stat"><b>${N(allPct)}%</b><span>إنجاز عام</span></div><div class="card stat"><b>${N(allDone)}</b><span>درس منجز</span></div><div class="card stat"><b>${N(ready)}</b><span>جاهز للترقية</span></div><div class="card stat"><b>${N(approved)}</b><span>تلاوات مقبولة</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div></div>
+    <div class="stats"><div class="card stat"><b>${N(allPct)}%</b><span>إنجاز عام</span></div><div class="card stat"><b>${N(allDone)}</b><span>درس منجز</span></div><div class="card stat c-warn"><i class="si">⭐</i><b>${N(allStars)}</b><span>إجمالي النجوم</span></div><div class="card stat"><b>${N(ready)}</b><span>جاهز للترقية</span></div><div class="card stat"><b>${N(approved)}</b><span>تلاوات مقبولة</span></div><div class="card stat"><b>${N(pending)}</b><span>تلاوات بانتظار</span></div></div>
     <h2>إنجاز المواد</h2><div class="card">${subs.map(s => `<div class="row" style="margin:8px 0"><div class="grow"><b>${s.icon} ${s.t}</b><div class="m">${N(s.cnt)} / ${N(s.total)} درس</div></div><div style="width:55%"><div class="bar" title="${s.pct}%"><i style="width:${s.pct}%"></i></div></div><b>${N(s.pct)}%</b></div>`).join('')}</div>
-    <h2>تقدّم الطلاب</h2><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>عام</th>${SECS.map(x => `<th>${x.icon}</th>`).join('')}</tr></thead><tbody id="rbody"></tbody></table></div>`;
+    <h2>تقدّم الطلاب</h2><div class="card tbl"><table><thead><tr><th>الطالب</th><th>المستوى</th><th>⭐</th><th>عام</th>${SECS.map(x => `<th>${x.icon}</th>`).join('')}</tr></thead><tbody id="rbody"></tbody></table></div>`;
   $('#rq').oninput = e => { reportFilter.q = e.target.value; refreshReportTable(); };
   $('#rl').onchange = e => { reportFilter.lv = e.target.value; refreshReportTable(); };
   $('#rsort').onchange = e => { reportFilter.sort = e.target.value; refreshReportTable(); };
@@ -1045,10 +1115,12 @@ function shome() {
   const recWait = myRec.filter(r => r.status === 'pending').length, recRev = redoRequests(s.id).length;
   const quizRecs = myRec.filter(r => r.status === 'approved' && (!r.quiz_at || !r.quiz_passed));
   const quizDone = myRec.filter(r => r.status === 'approved' && r.quiz_passed);
-  app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div></div>
+  const stars = starsOf(s.id);
+  app.innerHTML = `<div class="hero"><h1>أهلاً يا ${E(s.n)}</h1><div>مستواك: ${s.lv}</div><div class="m">تلاواتك: ${N(recOk)} مقبولة · ${N(recWait)} بانتظار المراجعة${recRev ? ' · ' + N(recRev) + ' تحتاج إعادة' : ''}</div><div class="lanterns" aria-label="${n} دروس">${[0, 1, 2, 3, 4, 5, 6].map(i => `<div class="ln ${i < n ? 'lit' : ''}"></div>`).join('')}</div><button class="btn lamp" id="home-stars" style="margin-top:10px">🏆 لوحة نجومي (${N(stars.total)})</button></div>
   <div class="stats">
     <div class="card stat c-good"><i class="si">📚</i><b>${N(n)}</b><span>دروس منجزة</span></div>
     <div class="card stat c-good"><i class="si">✅</i><b>${N(recOk)}</b><span>تلاوات مقبولة</span></div>
+    <div class="card stat c-warn"><i class="si">⭐</i><b>${N(stars.total)}</b><span>نجمة إنجاز</span></div>
     <div class="card stat c-warn"><i class="si">⏳</i><b>${N(recWait)}</b><span>بانتظار المراجعة</span></div>
     <div class="card stat c-bad"><i class="si">🔁</i><b>${N(recRev)}</b><span>تحتاج إعادة</span></div></div>
   ${notifyPanel(soon, 'student')}
@@ -1062,11 +1134,36 @@ function shome() {
       return `<button class="sub" data-sec="${x.id}"><span class="em">${x.icon}</span><b>${x.t}</b><div class="m">${N(it.filter(i => done[s.id].has(i.id)).length)} / ${N(it.length)}</div></button>`;
     }).join('')}<button class="sub" data-q="1"><span class="em">📖</span><b>القرآن</b><div class="m">رواية حفص</div></button></div>`;
   app.querySelectorAll('[data-o]').forEach(b => b.onclick = () => go({p: 'lesson', id: b.dataset.o, back: view}));
+  if ($('#home-stars')) $('#home-stars').onclick = () => go({p: 'stars'});
   app.querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => quizDlg(+b.dataset.quiz));
   app.querySelectorAll('[data-rd]').forEach(b => b.onclick = () => deleteRecitation(+b.dataset.rd));
   wireLate(); wireRedo();
   app.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => go({p: 'sec', sec: b.dataset.sec}));
   app.querySelector('[data-q]').onclick = () => go({p: 'quran'});
+}
+function starsView() {
+  const s = me();
+  if (!s) { app.innerHTML = `<div class="card">حسابك غير مرتبط بسجل طالب. تواصل مع المعلّم.</div>`; return; }
+  const st = starsOf(s.id);
+  const cells = Math.min(40, Math.max(12, st.total));
+  const lit = Math.min(st.total, cells);
+  const span = st.next ? Math.max(1, st.next.at - st.badge.at) : 1;
+  const pct = st.next ? Math.min(100, Math.max(0, Math.round((st.total - st.badge.at) / span * 100))) : 100;
+  app.innerHTML = `<h1>🏆 لوحة نجوم ${E(s.n)}</h1>
+  <div class="hero">
+    <div class="row" style="align-items:center"><div class="grow"><h1 style="margin:0">${N(st.total)} نجمة</h1><div class="m">كل إنجاز يضيف نجمة إلى لوحتك.</div></div><span class="star-badge">${st.badge.icon} ${st.badge.name}</span></div>
+    ${st.next ? `<div class="m" style="margin-top:10px">الوسم التالي: ${st.next.icon} ${E(st.next.name)} — تحتاج ${N(Math.max(0, st.next.at - st.total))} نجمة</div><div class="bar" style="margin-top:6px"><i style="width:${pct}%"></i></div>` : `<div class="m" style="margin-top:10px">أعلى وسط بلوحتك 🎉</div>`}
+    ${isTeacher() ? `<div class="m" style="margin-top:6px">معاينة للطالب — لوحته تُحسب من بياناته المحفوظة.</div>` : ''}
+  </div>
+  <div class="stats">
+    <div class="card stat c-good"><i class="si">📚</i><b>${N(st.lessons)}</b><span>درس منجز = نجمة</span></div>
+    <div class="card stat c-warn"><i class="si">🎙️</i><b>${N(st.recs)}</b><span>تلاوة مقبولة = نجمة</span></div>
+    <div class="card stat c-good"><i class="si">📝</i><b>${N(st.quizzes)}</b><span>اختبار ناجح = نجمة</span></div>
+  </div>
+  <div class="card"><h3 style="margin:0 0 4px">نجومك</h3><div class="stars-board" aria-label="${N(st.total)} نجمة">${Array.from({length: cells}, (_, i) => `<div class="star-cell ${i < lit ? 'lit' : ''}">⭐</div>`).join('')}</div>${st.total > cells ? `<div class="m" style="margin-top:8px">و${N(st.total - cells)} نجمة إضافية محفوظة في سجلك.</div>` : ''}</div>
+  <div class="card"><b>كيف تحصل على النجوم؟</b><div class="m" style="margin-top:4px">أنهي درساً، أو تُعتمد تلاوتك، أو تنجح في اختبار التلاوة. اللوحة تُحدَّث تلقائياً من بياناتك في Supabase.</div><div class="row" style="margin-top:10px"><button class="btn" id="stars-home">العودة للرئيسية</button>${!isTeacher() ? `<button class="btn alt" id="celebrate-me">🎉 احتفل بنجاحك</button>` : ''}</div></div>`;
+  $('#stars-home').onclick = () => go({p: 'home'});
+  if ($('#celebrate-me')) $('#celebrate-me').onclick = () => celebrate('party', 'أنت نجم!', `${N(st.total)} نجمة في لوحتك 🎉`);
 }
 function ssec() {
   const s = me();
